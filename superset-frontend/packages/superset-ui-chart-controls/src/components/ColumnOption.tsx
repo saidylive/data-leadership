@@ -16,19 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState, ReactNode, useLayoutEffect } from 'react';
+import { useState, ReactNode, useLayoutEffect, RefObject } from 'react';
 import { css, styled, SupersetTheme } from '@superset-ui/core';
 import { Tooltip } from './Tooltip';
 import { ColumnTypeLabel } from './ColumnTypeLabel/ColumnTypeLabel';
 import CertifiedIconWithTooltip from './CertifiedIconWithTooltip';
 import { ColumnMeta } from '../types';
-import { getColumnLabelText, getColumnTooltipNode } from './labelUtils';
+import {
+  getColumnLabelText,
+  getColumnTooltipNode,
+  getColumnTypeTooltipNode,
+} from './labelUtils';
 import { SQLPopover } from './SQLPopover';
 
 export type ColumnOptionProps = {
   column: ColumnMeta;
   showType?: boolean;
-  labelRef?: React.RefObject<any>;
+  labelRef?: RefObject<any>;
 };
 
 const StyleOverrides = styled.span`
@@ -48,22 +52,35 @@ export function ColumnOption({
   const hasExpression = expression && expression !== column_name;
   const type = hasExpression ? 'expression' : type_generic;
   const [tooltipText, setTooltipText] = useState<ReactNode>(column.column_name);
+  const [columnTypeTooltipText, setcolumnTypeTooltipText] = useState<ReactNode>(
+    column.type,
+  );
 
   useLayoutEffect(() => {
     setTooltipText(getColumnTooltipNode(column, labelRef));
+    setcolumnTypeTooltipText(getColumnTypeTooltipNode(column));
   }, [labelRef, column]);
 
   return (
     <StyleOverrides>
-      {showType && type !== undefined && <ColumnTypeLabel type={type} />}
+      {showType && type !== undefined && (
+        <Tooltip
+          id="metric-type-tooltip"
+          title={columnTypeTooltipText}
+          placement="bottomRight"
+          align={{ offset: [8, -2] }}
+        >
+          <span>
+            <ColumnTypeLabel type={type} />
+          </span>
+        </Tooltip>
+      )}
       <Tooltip id="metric-name-tooltip" title={tooltipText}>
         <span
           className="option-label column-option-label"
-          css={(theme: SupersetTheme) =>
-            css`
-              margin-right: ${theme.gridUnit}px;
-            `
-          }
+          css={(theme: SupersetTheme) => css`
+            margin-right: ${theme.gridUnit}px;
+          `}
           ref={labelRef}
         >
           {getColumnLabelText(column)}

@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import React from 'react';
 import { SuperChart } from '@superset-ui/core';
 import dummyDatasource from '../../../../../shared/dummyDatasource';
 import data from '../data';
@@ -31,7 +30,7 @@ export const controlsShown = () => (
     queriesData={[{ data }]}
     formData={{
       bottomMargin: 'auto',
-      colorCcheme: 'd3Category10',
+      colorScheme: 'd3Category10',
       contribution: false,
       groupby: ['region'],
       lineInterpolation: 'linear',

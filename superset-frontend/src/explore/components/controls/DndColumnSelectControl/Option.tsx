@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import { styled, t, useTheme } from '@superset-ui/core';
 import Icons from 'src/components/Icons';
 import {
@@ -38,6 +38,7 @@ export default function Option({
   clickClose,
   withCaret,
   isExtra,
+  datasourceWarningMessage,
   canDelete = true,
 }: OptionProps) {
   const theme = useTheme();
@@ -60,15 +61,18 @@ export default function Option({
         </CloseContainer>
       )}
       <Label data-test="control-label">{children}</Label>
-      {isExtra && (
+      {(!!datasourceWarningMessage || isExtra) && (
         <StyledInfoTooltipWithTrigger
           icon="exclamation-triangle"
           placement="top"
           bsStyle="warning"
-          tooltip={t(`
+          tooltip={
+            datasourceWarningMessage ||
+            t(`
                 This filter was inherited from the dashboard's context.
                 It won't be saved when saving the chart.
-              `)}
+              `)
+          }
         />
       )}
       {withCaret && (

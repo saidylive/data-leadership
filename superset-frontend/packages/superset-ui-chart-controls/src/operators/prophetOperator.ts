@@ -16,17 +16,16 @@
  * specific language governing permissions and limitationsxw
  * under the License.
  */
-import { PostProcessingProphet } from '@superset-ui/core';
+import { PostProcessingProphet, getXAxisLabel } from '@superset-ui/core';
 import { PostProcessingFactory } from './types';
-import { getAxis } from './utils';
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
 export const prophetOperator: PostProcessingFactory<PostProcessingProphet> = (
   formData,
   queryObject,
 ) => {
-  const xAxis = getAxis(formData);
-  if (formData.forecastEnabled && xAxis) {
+  const xAxisLabel = getXAxisLabel(formData);
+  if (formData.forecastEnabled && xAxisLabel) {
     return {
       operation: 'prophet',
       options: {
@@ -36,7 +35,7 @@ export const prophetOperator: PostProcessingFactory<PostProcessingProphet> = (
         yearly_seasonality: formData.forecastSeasonalityYearly,
         weekly_seasonality: formData.forecastSeasonalityWeekly,
         daily_seasonality: formData.forecastSeasonalityDaily,
-        index: xAxis,
+        index: xAxisLabel,
       },
     };
   }

@@ -17,19 +17,25 @@
  * under the License.
  */
 /* eslint camelcase: 0 */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import { bindActionCreators } from 'redux';
 import { connect } from 'react-redux';
-import { styled, t, css, useTheme, logging } from '@superset-ui/core';
-import { debounce, pick } from 'lodash';
+import {
+  styled,
+  t,
+  css,
+  useTheme,
+  logging,
+  useChangeEffect,
+  useComponentDidMount,
+  usePrevious,
+} from '@superset-ui/core';
+import { debounce, isEqual, isObjectLike, omit, pick } from 'lodash';
 import { Resizable } from 're-resizable';
-import { useChangeEffect } from 'src/hooks/useChangeEffect';
 import { usePluginContext } from 'src/components/DynamicPlugins';
 import { Global } from '@emotion/react';
 import { Tooltip } from 'src/components/Tooltip';
-import { usePrevious } from 'src/hooks/usePrevious';
-import { useComponentDidMount } from 'src/hooks/useComponentDidMount';
 import Icons from 'src/components/Icons';
 import {
   getItem,
@@ -37,6 +43,7 @@ import {
   LocalStorageKeys,
 } from 'src/utils/localStorageHelpers';
 import { RESERVED_CHART_URL_PARAMS, URL_PARAMS } from 'src/constants';
+import { QUERY_MODE_REQUISITES } from 'src/explore/constants';
 import { areObjectsEqual } from 'src/reduxUtils';
 import * as logActions from 'src/logger/actions';
 import {
@@ -62,6 +69,7 @@ import ConnectedControlPanelsContainer from '../ControlPanelsContainer';
 import SaveModal from '../SaveModal';
 import DataSourcePanel from '../DatasourcePanel';
 import ConnectedExploreChartHeader from '../ExploreChartHeader';
+import ExploreContainer from '../ExploreContainer';
 
 const propTypes = {
   ...ExploreChartPanel.propTypes,
@@ -80,14 +88,9 @@ const propTypes = {
   timeout: PropTypes.number,
   impressionId: PropTypes.string,
   vizType: PropTypes.string,
+  saveAction: PropTypes.string,
+  isSaveModalVisible: PropTypes.bool,
 };
-
-const ExploreContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-`;
 
 const ExplorePanelContainer = styled.div`
   ${({ theme }) => css`
@@ -167,7 +170,9 @@ const updateHistory = debounce(
   ) => {
     const payload = { ...formData };
     const chartId = formData.slice_id;
-    const additionalParam = {};
+    const params = new URLSearchParams(window.location.search);
+    const additionalParam = Object.fromEntries(params);
+
     if (chartId) {
       additionalParam[URL_PARAMS.sliceId.name] = chartId;
     } else {
@@ -225,6 +230,20 @@ const updateHistory = debounce(
   1000,
 );
 
+const defaultSidebarsWidth = {
+  controls_width: 320,
+  datasource_width: 300,
+};
+
+function getSidebarWidths(key) {
+  return getItem(key, defaultSidebarsWidth[key]);
+}
+
+function setSidebarWidths(key, dimension) {
+  const newDimension = Number(getSidebarWidths(key)) + dimension.width;
+  setItem(key, newDimension);
+}
+
 function ExploreViewContainer(props) {
   const dynamicPluginContext = usePluginContext();
   const dynamicPlugin = dynamicPluginContext.dynamicPlugins[props.vizType];
@@ -238,17 +257,13 @@ function ExploreViewContainer(props) {
     props.controls,
   );
 
-  const [showingModal, setShowingModal] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [shouldForceUpdate, setShouldForceUpdate] = useState(-1);
+  const [width, setWidth] = useState(
+    getSidebarWidths(LocalStorageKeys.DatasourceWidth),
+  );
   const tabId = useTabId();
 
   const theme = useTheme();
-
-  const defaultSidebarsWidth = {
-    controls_width: 320,
-    datasource_width: 300,
-  };
 
   const addHistory = useCallback(
     async ({ isReplace = false, title } = {}) => {
@@ -334,10 +349,6 @@ function ExploreViewContainer(props) {
     if (props.chart && props.chart.queryController) {
       props.chart.queryController.abort();
     }
-  }
-
-  function toggleModal() {
-    setShowingModal(!showingModal);
   }
 
   function toggleCollapse() {
@@ -450,14 +461,21 @@ function ExploreViewContainer(props) {
 
   const chartIsStale = useMemo(() => {
     if (lastQueriedControls) {
-      const changedControlKeys = Object.keys(props.controls).filter(
-        key =>
-          typeof lastQueriedControls[key] !== 'undefined' &&
-          !areObjectsEqual(
-            props.controls[key].value,
-            lastQueriedControls[key].value,
-          ),
-      );
+      const { controls } = props;
+      const changedControlKeys = Object.keys(controls).filter(key => {
+        const lastControl = lastQueriedControls[key];
+        if (typeof lastControl === 'undefined') {
+          return false;
+        }
+        const { value: value1 } = controls[key];
+        const { value: value2 } = lastControl;
+        if (isObjectLike(value1) && isObjectLike(value2)) {
+          return !areObjectsEqual(value1, value2, {
+            ignoreFields: ['datasourceWarning'],
+          });
+        }
+        return !isEqual(value1, value2);
+      });
 
       return changedControlKeys.some(
         key =>
@@ -468,11 +486,11 @@ function ExploreViewContainer(props) {
     return false;
   }, [lastQueriedControls, props.controls]);
 
-  const saveAction = getUrlParam(URL_PARAMS.saveAction);
-  useChangeEffect(saveAction, () => {
-    if (['saveas', 'overwrite'].includes(saveAction)) {
+  useChangeEffect(props.saveAction, () => {
+    if (['saveas', 'overwrite'].includes(props.saveAction)) {
       onQuery();
       addHistory({ isReplace: true });
+      props.actions.setSaveAction(null);
     }
   });
 
@@ -534,15 +552,6 @@ function ExploreViewContainer(props) {
     );
   }
 
-  function getSidebarWidths(key) {
-    return getItem(key, defaultSidebarsWidth[key]);
-  }
-
-  function setSidebarWidths(key, dimension) {
-    const newDimension = Number(getSidebarWidths(key)) + dimension.width;
-    setItem(key, newDimension);
-  }
-
   if (props.standalone) {
     return renderChartContainer();
   }
@@ -563,8 +572,8 @@ function ExploreViewContainer(props) {
         ownState={props.ownState}
         user={props.user}
         reports={props.reports}
-        onSaveChart={toggleModal}
         saveDisabled={errorMessage || props.chart.chartStatus === 'loading'}
+        metadata={props.metadata}
       />
       <ExplorePanelContainer id="explore-container">
         <Global
@@ -591,27 +600,16 @@ function ExploreViewContainer(props) {
             }
           `}
         />
-        {showingModal && (
-          <SaveModal
-            addDangerToast={props.addDangerToast}
-            onHide={toggleModal}
-            actions={props.actions}
-            form_data={props.form_data}
-            sliceName={props.sliceName}
-            dashboardId={props.dashboardId}
-            sliceDashboards={props.exploreState.sliceDashboards ?? []}
-          />
-        )}
         <Resizable
           onResizeStop={(evt, direction, ref, d) => {
-            setShouldForceUpdate(d?.width);
-            setSidebarWidths(LocalStorageKeys.datasource_width, d);
+            setWidth(ref.getBoundingClientRect().width);
+            setSidebarWidths(LocalStorageKeys.DatasourceWidth, d);
           }}
           defaultSize={{
-            width: getSidebarWidths(LocalStorageKeys.datasource_width),
+            width: getSidebarWidths(LocalStorageKeys.DatasourceWidth),
             height: '100%',
           }}
-          minWidth={defaultSidebarsWidth[LocalStorageKeys.datasource_width]}
+          minWidth={defaultSidebarsWidth[LocalStorageKeys.DatasourceWidth]}
           maxWidth="33%"
           enable={{ right: true }}
           className={
@@ -638,7 +636,7 @@ function ExploreViewContainer(props) {
             datasource={props.datasource}
             controls={props.controls}
             actions={props.actions}
-            shouldForceUpdate={shouldForceUpdate}
+            width={width}
             user={props.user}
           />
         </Resizable>
@@ -663,13 +661,13 @@ function ExploreViewContainer(props) {
         ) : null}
         <Resizable
           onResizeStop={(evt, direction, ref, d) =>
-            setSidebarWidths(LocalStorageKeys.controls_width, d)
+            setSidebarWidths(LocalStorageKeys.ControlsWidth, d)
           }
           defaultSize={{
-            width: getSidebarWidths(LocalStorageKeys.controls_width),
+            width: getSidebarWidths(LocalStorageKeys.ControlsWidth),
             height: '100%',
           }}
-          minWidth={defaultSidebarsWidth[LocalStorageKeys.controls_width]}
+          minWidth={defaultSidebarsWidth[LocalStorageKeys.ControlsWidth]}
           maxWidth="33%"
           enable={{ right: true }}
           className="col-sm-3 explore-column controls-column"
@@ -698,17 +696,43 @@ function ExploreViewContainer(props) {
           {renderChartContainer()}
         </div>
       </ExplorePanelContainer>
+      {props.isSaveModalVisible && (
+        <SaveModal
+          addDangerToast={props.addDangerToast}
+          actions={props.actions}
+          form_data={props.form_data}
+          sliceName={props.sliceName}
+          dashboardId={props.dashboardId}
+        />
+      )}
     </ExploreContainer>
   );
 }
 
 ExploreViewContainer.propTypes = propTypes;
 
+const retainQueryModeRequirements = hiddenFormData =>
+  Object.keys(hiddenFormData ?? {}).filter(
+    key => !QUERY_MODE_REQUISITES.has(key),
+  );
+
 function mapStateToProps(state) {
-  const { explore, charts, common, impressionId, dataMask, reports, user } =
-    state;
-  const { controls, slice, datasource } = explore;
-  const form_data = getFormDataFromControls(controls);
+  const {
+    explore,
+    charts,
+    common,
+    impressionId,
+    dataMask,
+    reports,
+    user,
+    saveModal,
+  } = state;
+  const { controls, slice, datasource, metadata, hiddenFormData } = explore;
+  const hasQueryMode = !!controls.query_mode?.value;
+  const fieldsToOmit = hasQueryMode
+    ? retainQueryModeRequirements(hiddenFormData)
+    : Object.keys(hiddenFormData ?? {});
+  const form_data = omit(getFormDataFromControls(controls), fieldsToOmit);
   const slice_id = form_data.slice_id ?? slice?.slice_id ?? 0; // 0 - unsaved chart
   form_data.extra_form_data = mergeExtraFormData(
     { ...form_data.extra_form_data },
@@ -753,6 +777,9 @@ function mapStateToProps(state) {
     user,
     exploreState: explore,
     reports,
+    metadata,
+    saveAction: explore.saveAction,
+    isSaveModalVisible: saveModal.isVisible,
   };
 }
 
@@ -772,4 +799,4 @@ function mapDispatchToProps(dispatch) {
 export default connect(
   mapStateToProps,
   mapDispatchToProps,
-)(withToasts(ExploreViewContainer));
+)(withToasts(memo(ExploreViewContainer)));

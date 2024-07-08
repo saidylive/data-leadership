@@ -16,22 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { t } from '@superset-ui/core';
 import {
-  FeatureFlag,
-  isFeatureEnabled,
-  t,
-  validateNonEmpty,
-} from '@superset-ui/core';
-import {
-  columnChoices,
   ControlPanelConfig,
-  ControlPanelState,
-  formatSelectOptions,
   formatSelectOptionsForRange,
-  sections,
   sharedControls,
   getStandardizedControls,
+  D3_TIME_FORMAT_DOCS,
 } from '@superset-ui/chart-controls';
 
 const sortAxisChoices = [
@@ -41,28 +32,13 @@ const sortAxisChoices = [
   ['value_desc', t('Metric descending')],
 ];
 
-const allColumns = {
-  type: 'SelectControl',
-  default: null,
-  description: t('Columns to display'),
-  mapStateToProps: (state: ControlPanelState) => ({
-    choices: columnChoices(state.datasource),
-  }),
-  validators: [validateNonEmpty],
-};
-
 const dndAllColumns = {
   ...sharedControls.entity,
   description: t('Columns to display'),
 };
 
-const columnsConfig = isFeatureEnabled(FeatureFlag.ENABLE_EXPLORE_DRAG_AND_DROP)
-  ? dndAllColumns
-  : allColumns;
-
 const config: ControlPanelConfig = {
   controlPanelSections: [
-    sections.legacyRegularTime,
     {
       label: t('Query'),
       expanded: true,
@@ -71,8 +47,8 @@ const config: ControlPanelConfig = {
           {
             name: 'all_columns_x',
             config: {
-              ...columnsConfig,
-              label: 'X Axis',
+              ...dndAllColumns,
+              label: t('X Axis'),
             },
           },
         ],
@@ -80,26 +56,15 @@ const config: ControlPanelConfig = {
           {
             name: 'all_columns_y',
             config: {
-              ...columnsConfig,
-              label: 'Y Axis',
+              ...dndAllColumns,
+              label: t('Y Axis'),
             },
           },
         ],
         ['metric'],
         ['adhoc_filters'],
         ['row_limit'],
-        [
-          {
-            name: 'sort_by_metric',
-            config: {
-              type: 'CheckboxControl',
-              label: t('Sort by metric'),
-              description: t(
-                'Whether to sort results by the selected metric in descending order.',
-              ),
-            },
-          },
-        ],
+        ['sort_by_metric'],
       ],
     },
     {
@@ -148,8 +113,8 @@ const config: ControlPanelConfig = {
               label: t('Rendering'),
               renderTrigger: true,
               choices: [
-                ['pixelated', 'pixelated (Sharp)'],
-                ['auto', 'auto (Smooth)'],
+                ['pixelated', t('pixelated (Sharp)')],
+                ['auto', t('auto (Smooth)')],
               ],
               default: 'pixelated',
               description: t(
@@ -166,9 +131,9 @@ const config: ControlPanelConfig = {
               type: 'SelectControl',
               label: t('Normalize Across'),
               choices: [
-                ['heatmap', 'heatmap'],
-                ['x', 'x'],
-                ['y', 'y'],
+                ['heatmap', t('heatmap')],
+                ['x', t('x')],
+                ['y', t('y')],
               ],
               default: 'heatmap',
               description: (
@@ -200,15 +165,15 @@ const config: ControlPanelConfig = {
               freeForm: true,
               clearable: false,
               label: t('Left Margin'),
-              choices: formatSelectOptions([
-                'auto',
-                50,
-                75,
-                100,
-                125,
-                150,
-                200,
-              ]),
+              choices: [
+                ['auto', t('auto')],
+                [50, '50'],
+                [75, '75'],
+                [100, '100'],
+                [125, '125'],
+                [150, '150'],
+                [200, '200'],
+              ],
               default: 'auto',
               renderTrigger: true,
               description: t(
@@ -225,15 +190,15 @@ const config: ControlPanelConfig = {
               clearable: false,
               freeForm: true,
               label: t('Bottom Margin'),
-              choices: formatSelectOptions([
-                'auto',
-                50,
-                75,
-                100,
-                125,
-                150,
-                200,
-              ]),
+              choices: [
+                ['auto', t('auto')],
+                [50, '50'],
+                [75, '75'],
+                [100, '100'],
+                [125, '125'],
+                [150, '150'],
+                [200, '200'],
+              ],
               default: 'auto',
               renderTrigger: true,
               description: t(
@@ -258,6 +223,17 @@ const config: ControlPanelConfig = {
           },
         ],
         ['y_axis_format'],
+        [
+          {
+            name: 'time_format',
+            config: {
+              ...sharedControls.x_axis_time_format,
+              default: '%d/%m/%Y',
+              description: `${D3_TIME_FORMAT_DOCS}.`,
+            },
+          },
+        ],
+        ['currency_format'],
         [
           {
             name: 'sort_x_axis',

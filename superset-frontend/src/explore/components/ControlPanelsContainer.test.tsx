@@ -16,19 +16,29 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { useSelector } from 'react-redux';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from 'spec/helpers/testing-library';
 import {
   DatasourceType,
   getChartControlPanelRegistry,
   t,
 } from '@superset-ui/core';
-import { defaultControls } from 'src/explore/store';
+import { defaultControls, defaultState } from 'src/explore/store';
+import { ExplorePageState } from 'src/explore/types';
 import { getFormDataFromControls } from 'src/explore/controlUtils';
 import {
   ControlPanelsContainer,
   ControlPanelsContainerProps,
 } from 'src/explore/components/ControlPanelsContainer';
+
+const FormDataMock = () => {
+  const formData = useSelector(
+    (state: ExplorePageState) => state.explore.form_data,
+  );
+
+  return <div data-test="mock-formdata">{Object.keys(formData).join(':')}</div>;
+};
 
 describe('ControlPanelsContainer', () => {
   beforeAll(() => {
@@ -104,5 +114,93 @@ describe('ControlPanelsContainer', () => {
     expect(
       await screen.findAllByTestId('collapsible-control-panel-header'),
     ).toHaveLength(4);
+    expect(screen.getByRole('tab', { name: /customize/i })).toBeInTheDocument();
+    userEvent.click(screen.getByRole('tab', { name: /customize/i }));
+    expect(
+      await screen.findAllByTestId('collapsible-control-panel-header'),
+    ).toHaveLength(5);
+  });
+
+  test('renders ControlPanelSections no Customize Tab', async () => {
+    getChartControlPanelRegistry().registerValue('table', {
+      controlPanelSections: [
+        {
+          label: t('GROUP BY'),
+          description: t(
+            'Use this section if you want a query that aggregates',
+          ),
+          expanded: true,
+          controlSetRows: [
+            ['groupby'],
+            ['metrics'],
+            ['percent_metrics'],
+            ['timeseries_limit_metric', 'row_limit'],
+            ['include_time', 'order_desc'],
+          ],
+        },
+        {
+          label: t('Options'),
+          expanded: true,
+          controlSetRows: [],
+        },
+      ],
+    });
+    render(<ControlPanelsContainer {...getDefaultProps()} />, {
+      useRedux: true,
+    });
+    expect(screen.queryByText(/customize/i)).not.toBeInTheDocument();
+    expect(
+      await screen.findAllByTestId('collapsible-control-panel-header'),
+    ).toHaveLength(2);
+  });
+
+  test('visibility of panels is correctly applied', async () => {
+    getChartControlPanelRegistry().registerValue('table', {
+      controlPanelSections: [
+        {
+          label: t('Advanced analytics'),
+          description: t('Advanced analytics post processing'),
+          expanded: true,
+          controlSetRows: [['groupby'], ['metrics'], ['percent_metrics']],
+          visibility: () => false,
+        },
+        {
+          label: t('Chart Title'),
+          visibility: () => true,
+          controlSetRows: [['timeseries_limit_metric', 'row_limit']],
+        },
+        {
+          label: t('Chart Options'),
+          controlSetRows: [['include_time', 'order_desc']],
+        },
+      ],
+    });
+    const { getByTestId } = render(
+      <>
+        <ControlPanelsContainer {...getDefaultProps()} />
+        <FormDataMock />
+      </>,
+      {
+        useRedux: true,
+        initialState: { explore: { form_data: defaultState.form_data } },
+      },
+    );
+
+    const disabledSection = screen.queryByRole('button', {
+      name: /advanced analytics/i,
+    });
+    expect(disabledSection).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /chart title/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /chart options/i }),
+    ).toBeInTheDocument();
+
+    expect(getByTestId('mock-formdata')).not.toHaveTextContent('groupby');
+    expect(getByTestId('mock-formdata')).not.toHaveTextContent('metrics');
+    expect(getByTestId('mock-formdata')).not.toHaveTextContent(
+      'percent_metrics',
+    );
   });
 });

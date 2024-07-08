@@ -16,12 +16,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { render, screen, fireEvent } from 'spec/helpers/testing-library';
 import userEvent from '@testing-library/user-event';
 import fetchMock from 'fetch-mock';
 import { getExtensionsRegistry } from '@superset-ui/core';
 import setupExtensions from 'src/setup/setupExtensions';
+import getOwnerName from 'src/utils/getOwnerName';
 import { HeaderProps } from './types';
 import Header from '.';
 
@@ -37,8 +37,26 @@ const createProps = () => ({
     userId: '1',
     metadata: {},
     common: {
-      conf: {},
+      conf: {
+        DASHBOARD_AUTO_REFRESH_INTERVALS: [
+          [0, "Don't refresh"],
+          [10, '10 seconds'],
+        ],
+      },
     },
+    changed_on_delta_humanized: '7 minutes ago',
+    changed_by: {
+      id: 3,
+      first_name: 'John',
+      last_name: 'Doe',
+    },
+    created_on_delta_humanized: '10 days ago',
+    created_by: {
+      id: 2,
+      first_name: 'Kay',
+      last_name: 'Mon',
+    },
+    owners: [{ first_name: 'John', last_name: 'Doe', id: 1 }],
   },
   user: {
     createdOn: '2021-04-27T18:12:38.952304',
@@ -68,7 +86,6 @@ const createProps = () => ({
   fetchFaveStar: jest.fn(),
   fetchCharts: jest.fn(),
   onRefresh: jest.fn(),
-  fetchUISpecificReport: jest.fn(),
   saveFaveStar: jest.fn(),
   savePublished: jest.fn(),
   isPublished: false,
@@ -77,7 +94,8 @@ const createProps = () => ({
   setEditMode: jest.fn(),
   showBuilderPane: jest.fn(),
   updateCss: jest.fn(),
-  setColorSchemeAndUnsavedChanges: jest.fn(),
+  setColorScheme: jest.fn(),
+  setUnsavedChanges: jest.fn(),
   logEvent: jest.fn(),
   setRefreshFrequency: jest.fn(),
   hasUnsavedChanges: false,
@@ -90,6 +108,7 @@ const createProps = () => ({
   maxUndoHistoryToast: jest.fn(),
   dashboardInfoChanged: jest.fn(),
   dashboardTitleChanged: jest.fn(),
+  showMenuDropdown: true,
 });
 const props = createProps();
 const editableProps = {
@@ -179,6 +198,17 @@ test('should publish', () => {
   expect(mockedProps.savePublished).toHaveBeenCalledTimes(0);
   userEvent.click(draft);
   expect(mockedProps.savePublished).toHaveBeenCalledTimes(1);
+});
+
+test('should render metadata', () => {
+  const mockedProps = createProps();
+  setup(mockedProps);
+  expect(
+    screen.getByText(getOwnerName(mockedProps.dashboardInfo.created_by)),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(mockedProps.dashboardInfo.changed_on_delta_humanized),
+  ).toBeInTheDocument();
 });
 
 test('should render the "Undo" action as disabled', () => {

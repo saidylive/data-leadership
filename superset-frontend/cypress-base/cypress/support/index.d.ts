@@ -29,7 +29,6 @@ declare namespace Cypress {
      * Login test user.
      */
     login(): void;
-    preserveLogin(): void;
 
     /**
      *
@@ -42,6 +41,7 @@ declare namespace Cypress {
     cleanDashboards(): cy;
     loadChartFixtures(): cy;
     loadDashboardFixtures(): cy;
+    allowConsoleErrors(consoleMessages: (string | RegExp)[]): cy;
 
     visitChartByParams(params: string | Record<string, unknown>): cy;
     visitChartByName(name: string): cy;
@@ -65,6 +65,7 @@ declare namespace Cypress {
      * Get
      */
     getDashboards(): cy;
+    getDashboard(dashboardId: string | number): Record<string, any>;
     getCharts(): cy;
 
     /**
@@ -80,6 +81,11 @@ declare namespace Cypress {
     deleteDashboardByName(dashboardName: string, failOnStatusCode: boolean): cy;
     deleteChartByName(name: string, failOnStatusCode: boolean): cy;
     deleteChart(id: number, failOnStatusCode: boolean): cy;
+
+    /**
+     * Update
+     */
+    updateDashboard(dashboardId: number, body: Record<string, any>): cy;
   }
 }
 

@@ -20,7 +20,7 @@ import {
   CustomControlItem,
   InfoTooltipWithTrigger,
 } from '@superset-ui/chart-controls';
-import React from 'react';
+import { ReactNode } from 'react';
 import { AntdCheckbox, FormInstance } from 'src/components';
 import {
   Filter,
@@ -75,11 +75,11 @@ export default function getControlItemsMap({
     getControlItems(controlPanelRegistry.get(filterType)) ?? [];
   const mapControlItems: Record<
     string,
-    { element: React.ReactNode; checked: boolean }
+    { element: ReactNode; checked: boolean }
   > = {};
   const mapMainControlItems: Record<
     string,
-    { element: React.ReactNode; checked: boolean }
+    { element: ReactNode; checked: boolean }
   > = {};
 
   controlItems
@@ -129,7 +129,7 @@ export default function getControlItemsMap({
                 doesColumnMatchFilterType(formFilter?.filterType || '', column)
               }
               onChange={() => {
-                // We need reset default value when when column changed
+                // We need reset default value when column changed
                 setNativeFilterFieldValues(form, filterId, {
                   defaultDataMask: null,
                 });

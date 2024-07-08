@@ -16,15 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { render, screen, waitFor } from 'spec/helpers/testing-library';
 import fetchMock from 'fetch-mock';
-import * as utils from 'src/utils/getClientErrorObject';
+import * as uiCore from '@superset-ui/core';
 import { Column, JsonObject } from '@superset-ui/core';
 import userEvent from '@testing-library/user-event';
 import { ColumnSelect } from './ColumnSelect';
 
-fetchMock.get('glob:*/api/v1/dataset/123', {
+fetchMock.get('glob:*/api/v1/dataset/123?*', {
   body: {
     result: {
       columns: [
@@ -35,7 +34,7 @@ fetchMock.get('glob:*/api/v1/dataset/123', {
     },
   },
 });
-fetchMock.get('glob:*/api/v1/dataset/456', {
+fetchMock.get('glob:*/api/v1/dataset/456?*', {
   body: {
     result: {
       columns: [
@@ -47,7 +46,7 @@ fetchMock.get('glob:*/api/v1/dataset/456', {
   },
 });
 
-fetchMock.get('glob:*/api/v1/dataset/789', { status: 404 });
+fetchMock.get('glob:*/api/v1/dataset/789?*', { status: 404 });
 
 const createProps = (extraProps: JsonObject = {}) => ({
   filterId: 'filterId',
@@ -97,7 +96,7 @@ test('Should call "getClientErrorObject" when api returns an error', async () =>
   const props = createProps();
 
   props.datasetId = 789;
-  const spy = jest.spyOn(utils, 'getClientErrorObject');
+  const spy = jest.spyOn(uiCore, 'getClientErrorObject');
 
   expect(spy).not.toBeCalled();
   render(<ColumnSelect {...(props as any)} />, {

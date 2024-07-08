@@ -17,20 +17,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useMemo } from 'react';
-import {
-  FeatureFlag,
-  isFeatureEnabled,
-  QueryColumn,
-  QueryResponse,
-  t,
-  validateNonEmpty,
-} from '@superset-ui/core';
+import { QueryColumn, t, validateNonEmpty } from '@superset-ui/core';
 import {
   ExtraControlProps,
   SharedControlConfig,
   Dataset,
   Metric,
+  isDataset,
 } from '../types';
 import { DATASET_TIME_COLUMN_OPTION, TIME_FILTER_LABELS } from '../constants';
 import {
@@ -39,8 +32,10 @@ import {
   ColumnOption,
   ColumnMeta,
   FilterOption,
+  temporalColumnMixin,
+  datePickerInAdhocFilterMixin,
+  xAxisMixin,
 } from '..';
-import { xAxisControlConfig } from './constants';
 
 type Control = {
   savedMetrics?: Metric[] | null;
@@ -69,18 +64,17 @@ export const dndGroupByControl: SharedControlConfig<
   default: [],
   includeTime: false,
   description: t(
-    'One or many columns to group by. High cardinality groupings should include a sort by metric ' +
-      'and series limit to limit the number of fetched and rendered series.',
+    'Dimensions contain qualitative values such as names, dates, or geographical data. ' +
+      'Use dimensions to categorize, segment, and reveal the details in your data. ' +
+      'Dimensions affect the level of detail in the view.',
   ),
   optionRenderer: (c: ColumnMeta) => <ColumnOption showType column={c} />,
   valueRenderer: (c: ColumnMeta) => <ColumnOption column={c} />,
   valueKey: 'column_name',
   allowAll: true,
   filterOption: ({ data: opt }: FilterOption<ColumnMeta>, text: string) =>
-    (opt.column_name &&
-      opt.column_name.toLowerCase().includes(text.toLowerCase())) ||
-    (opt.verbose_name &&
-      opt.verbose_name.toLowerCase().includes(text.toLowerCase())) ||
+    opt.column_name?.toLowerCase().includes(text.toLowerCase()) ||
+    opt.verbose_name?.toLowerCase().includes(text.toLowerCase()) ||
     false,
   promptTextCreator: (label: unknown) => label,
   mapStateToProps(state, controlState) {
@@ -108,7 +102,7 @@ export const dndGroupByControl: SharedControlConfig<
 export const dndColumnsControl: typeof dndGroupByControl = {
   ...dndGroupByControl,
   label: t('Columns'),
-  description: t('One or many columns to pivot as columns'),
+  description: t('Add dataset columns here to group the pivot table columns.'),
 };
 
 export const dndSeriesControl: typeof dndGroupByControl = {
@@ -118,8 +112,7 @@ export const dndSeriesControl: typeof dndGroupByControl = {
   default: null,
   description: t(
     'Defines the grouping of entities. ' +
-      'Each series is shown as a specific color on the chart and ' +
-      'has a legend toggle',
+      'Each series is represented by a specific color in the chart.',
   ),
 };
 
@@ -140,8 +133,8 @@ export const dndAdhocFilterControl: SharedControlConfig<
   default: [],
   description: '',
   mapStateToProps: ({ datasource, form_data }) => ({
-    columns: datasource?.columns[0]?.hasOwnProperty('filterable')
-      ? (datasource as Dataset)?.columns.filter(c => c.filterable)
+    columns: isDataset(datasource)
+      ? datasource.columns.filter(c => c.filterable)
       : datasource?.columns || [],
     savedMetrics: defineSavedMetrics(datasource),
     // current active adhoc metrics
@@ -150,6 +143,7 @@ export const dndAdhocFilterControl: SharedControlConfig<
     datasource,
   }),
   provideFormDataToProps: true,
+  ...datePickerInAdhocFilterMixin,
 };
 
 export const dndAdhocMetricsControl: SharedControlConfig<
@@ -165,21 +159,29 @@ export const dndAdhocMetricsControl: SharedControlConfig<
     datasource,
     datasourceType: datasource?.type,
   }),
-  description: t('One or many metrics to display'),
+  description: t(
+    'Select one or many metrics to display. ' +
+      'You can use an aggregation function on a column ' +
+      'or write custom SQL to create a metric.',
+  ),
 };
 
 export const dndAdhocMetricControl: typeof dndAdhocMetricsControl = {
   ...dndAdhocMetricsControl,
   multi: false,
   label: t('Metric'),
-  description: t('Metric'),
+  description: t(
+    'Select a metric to display. ' +
+      'You can use an aggregation function on a column ' +
+      'or write custom SQL to create a metric.',
+  ),
 };
 
 export const dndAdhocMetricControl2: typeof dndAdhocMetricControl = {
   ...dndAdhocMetricControl,
   label: t('Right Axis Metric'),
   clearable: true,
-  description: t('Choose a metric for right axis'),
+  description: t('Select a metric to display on the right axis'),
 };
 
 export const dndSortByControl: SharedControlConfig<
@@ -189,8 +191,8 @@ export const dndSortByControl: SharedControlConfig<
   label: t('Sort by'),
   default: null,
   description: t(
-    'Metric used to define how the top series are sorted if a series or row limit is present. ' +
-      'If undefined reverts to the first metric (where appropriate).',
+    'This metric is used to define row selection criteria (how the rows are sorted) if a series or row limit is present. ' +
+      'If not defined, it reverts to the first metric (where appropriate).',
   ),
   mapStateToProps: ({ datasource }) => ({
     columns: datasource?.columns || [],
@@ -210,14 +212,18 @@ export const dndSizeControl: typeof dndAdhocMetricControl = {
 export const dndXControl: typeof dndAdhocMetricControl = {
   ...dndAdhocMetricControl,
   label: t('X Axis'),
-  description: t('Metric assigned to the [X] axis'),
+  description: t(
+    "The dataset column/metric that returns the values on your chart's x-axis.",
+  ),
   default: null,
 };
 
 export const dndYControl: typeof dndAdhocMetricControl = {
   ...dndAdhocMetricControl,
   label: t('Y Axis'),
-  description: t('Metric assigned to the [Y] axis'),
+  description: t(
+    "The dataset column/metric that returns the values on your chart's y-axis.",
+  ),
   default: null,
 };
 
@@ -231,6 +237,7 @@ export const dndSecondaryMetricControl: typeof dndAdhocMetricControl = {
 
 export const dndGranularitySqlaControl: typeof dndSeriesControl = {
   ...dndSeriesControl,
+  ...temporalColumnMixin,
   label: TIME_FILTER_LABELS.granularity_sqla,
   description: t(
     'The time column for the visualization. Note that you ' +
@@ -242,54 +249,13 @@ export const dndGranularitySqlaControl: typeof dndSeriesControl = {
   default: (c: Control) => c.default,
   clearable: false,
   canDelete: false,
-  ghostButtonText: t('Drop temporal column here'),
-  clickEnabledGhostButtonText: t('Drop a temporal column here or click'),
+  ghostButtonText: t('Drop a temporal column here or click'),
   optionRenderer: (c: ColumnMeta) => <ColumnOption showType column={c} />,
   valueRenderer: (c: ColumnMeta) => <ColumnOption column={c} />,
   valueKey: 'column_name',
-  mapStateToProps: ({ datasource }) => {
-    if (datasource?.columns[0]?.hasOwnProperty('column_name')) {
-      const temporalColumns =
-        (datasource as Dataset)?.columns?.filter(c => c.is_dttm) ?? [];
-      return {
-        options: temporalColumns,
-        default:
-          (datasource as Dataset)?.main_dttm_col ||
-          temporalColumns[0]?.column_name ||
-          null,
-        isTemporal: true,
-      };
-    }
-    const sortedQueryColumns = (datasource as QueryResponse)?.columns?.sort(
-      query => (query?.is_dttm ? -1 : 1),
-    );
-    return {
-      options: sortedQueryColumns,
-      default: sortedQueryColumns[0]?.name || null,
-      isTemporal: true,
-    };
-  },
 };
 
 export const dndXAxisControl: typeof dndGroupByControl = {
   ...dndGroupByControl,
-  ...xAxisControlConfig,
+  ...xAxisMixin,
 };
-
-export function withDndFallback(
-  DndComponent: React.ComponentType<any>,
-  FallbackComponent: React.ComponentType<any>,
-) {
-  return function DndControl(props: any) {
-    const enableExploreDnd = useMemo(
-      () => isFeatureEnabled(FeatureFlag.ENABLE_EXPLORE_DRAG_AND_DROP),
-      [],
-    );
-
-    return enableExploreDnd ? (
-      <DndComponent {...props} />
-    ) : (
-      <FallbackComponent {...props} />
-    );
-  };
-}

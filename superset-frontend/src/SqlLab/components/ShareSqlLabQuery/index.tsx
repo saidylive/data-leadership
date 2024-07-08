@@ -16,20 +16,25 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { shallowEqual, useSelector } from 'react-redux';
-import { t, useTheme, styled } from '@superset-ui/core';
+import {
+  FeatureFlag,
+  styled,
+  t,
+  useTheme,
+  isFeatureEnabled,
+  getClientErrorObject,
+} from '@superset-ui/core';
 import Button from 'src/components/Button';
 import Icons from 'src/components/Icons';
 import withToasts from 'src/components/MessageToasts/withToasts';
 import CopyToClipboard from 'src/components/CopyToClipboard';
 import { storeQuery } from 'src/utils/common';
-import { getClientErrorObject } from 'src/utils/getClientErrorObject';
-import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
-import { QueryEditor, SqlLabRootState } from 'src/SqlLab/types';
+import useQueryEditor from 'src/SqlLab/hooks/useQueryEditor';
+import { LOG_ACTIONS_SQLLAB_COPY_LINK } from 'src/logger/LogUtils';
+import useLogAction from 'src/logger/useLogAction';
 
-interface ShareSqlLabQueryPropTypes {
-  queryEditor: QueryEditor;
+interface ShareSqlLabQueryProps {
+  queryEditorId: string;
   addDangerToast: (msg: string) => void;
 }
 
@@ -43,25 +48,25 @@ const StyledIcon = styled(Icons.Link)`
   }
 `;
 
-function ShareSqlLabQuery({
-  queryEditor,
+const ShareSqlLabQuery = ({
+  queryEditorId,
   addDangerToast,
-}: ShareSqlLabQueryPropTypes) {
+}: ShareSqlLabQueryProps) => {
   const theme = useTheme();
-
-  const { dbId, name, schema, autorun, sql, remoteId } = useSelector<
-    SqlLabRootState,
-    Partial<QueryEditor>
-  >(({ sqlLab: { unsavedQueryEditor } }) => {
-    const { dbId, name, schema, autorun, sql, remoteId } = {
-      ...queryEditor,
-      ...(unsavedQueryEditor.id === queryEditor.id && unsavedQueryEditor),
-    };
-    return { dbId, name, schema, autorun, sql, remoteId };
-  }, shallowEqual);
+  const logAction = useLogAction({ queryEditorId });
+  const { dbId, name, schema, autorun, sql, remoteId, templateParams } =
+    useQueryEditor(queryEditorId, [
+      'dbId',
+      'name',
+      'schema',
+      'autorun',
+      'sql',
+      'remoteId',
+      'templateParams',
+    ]);
 
   const getCopyUrlForKvStore = (callback: Function) => {
-    const sharedQuery = { dbId, name, schema, autorun, sql };
+    const sharedQuery = { dbId, name, schema, autorun, sql, templateParams };
 
     return storeQuery(sharedQuery)
       .then(shortUrl => {
@@ -88,7 +93,10 @@ function ShareSqlLabQuery({
     }
   };
   const getCopyUrl = (callback: Function) => {
-    if (isFeatureEnabled(FeatureFlag.SHARE_QUERIES_VIA_KV_STORE)) {
+    logAction(LOG_ACTIONS_SQLLAB_COPY_LINK, {
+      shortcut: false,
+    });
+    if (isFeatureEnabled(FeatureFlag.ShareQueriesViaKvStore)) {
       return getCopyUrlForKvStore(callback);
     }
     return getCopyUrlForSavedQuery(callback);
@@ -112,7 +120,7 @@ function ShareSqlLabQuery({
   };
 
   const canShare =
-    !!remoteId || isFeatureEnabled(FeatureFlag.SHARE_QUERIES_VIA_KV_STORE);
+    !!remoteId || isFeatureEnabled(FeatureFlag.ShareQueriesViaKvStore);
 
   return (
     <>
@@ -127,6 +135,6 @@ function ShareSqlLabQuery({
       )}
     </>
   );
-}
+};
 
 export default withToasts(ShareSqlLabQuery);

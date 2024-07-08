@@ -16,14 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { mount } from 'enzyme';
 import { ThemeProvider, supersetTheme } from '@superset-ui/core';
 import Toast from 'src/components/MessageToasts/Toast';
 import { act } from 'react-dom/test-utils';
 import mockMessageToasts from './mockMessageToasts';
-
-jest.mock('src/components/Icons/Icon', () => () => <span />);
 
 const props = {
   toast: mockMessageToasts[0],

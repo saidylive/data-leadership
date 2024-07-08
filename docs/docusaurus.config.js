@@ -20,8 +20,8 @@
 // @ts-check
 // Note: type annotations allow type checking and IDEs autocompletion
 
-const lightCodeTheme = require('prism-react-renderer/themes/github');
-const darkCodeTheme = require('prism-react-renderer/themes/dracula');
+const lightCodeTheme = require("prism-react-renderer").themes.github;
+const darkCodeTheme = require("prism-react-renderer").themes.vsDark;
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -32,7 +32,7 @@ const config = {
   baseUrl: '/',
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'throw',
-  favicon: 'img/favicon.ico',
+  favicon: '/img/favicon.ico',
   organizationName: 'apache', // Usually your GitHub org/user name.
   projectName: 'superset', // Usually your repo name.
   themes: ['@saucelabs/theme-github-codeblock'],
@@ -52,7 +52,7 @@ const config = {
         toExtensions: ['exe', 'zip'],
         redirects: [
           {
-            to: '/docs/installation/installing-superset-using-docker-compose',
+            to: '/docs/installation/docker-compose',
             from: '/installation.html',
           },
           {
@@ -60,19 +60,19 @@ const config = {
             from: '/tutorials.html',
           },
           {
-            to: '/docs/creating-charts-dashboards/creating-your-first-dashboard',
+            to: '/docs/using-superset/creating-your-first-dashboard',
             from: '/admintutorial.html',
           },
           {
-            to: '/docs/creating-charts-dashboards/creating-your-first-dashboard',
+            to: '/docs/using-superset/creating-your-first-dashboard',
             from: '/usertutorial.html',
           },
           {
-            to: '/docs/security',
+            to: '/docs/security/',
             from: '/security.html',
           },
           {
-            to: '/docs/installation/sql-templating',
+            to: '/docs/configuration/sql-templating',
             from: '/sqllab.html',
           },
           {
@@ -80,31 +80,31 @@ const config = {
             from: '/gallery.html',
           },
           {
-            to: '/docs/databases/druid',
+            to: '/docs/configuration/databases',
             from: '/druid.html',
           },
           {
-            to: '/docs/miscellaneous/country-map-tools',
+            to: '/docs/configuration/country-map-tools',
             from: '/misc.html',
           },
           {
-            to: '/docs/miscellaneous/country-map-tools',
+            to: '/docs/configuration/country-map-tools',
             from: '/visualization.html',
           },
           {
-            to: '/docs/frequently-asked-questions',
+            to: '/docs/faq',
             from: '/videos.html',
           },
           {
-            to: '/docs/frequently-asked-questions',
+            to: '/docs/faq',
             from: '/faq.html',
           },
           {
-            to: '/docs/creating-charts-dashboards/creating-your-first-dashboard',
+            to: '/docs/using-superset/creating-your-first-dashboard',
             from: '/tutorial.html',
           },
           {
-            to: '/docs/creating-charts-dashboards/creating-your-first-dashboard',
+            to: '/docs/using-superset/creating-your-first-dashboard',
             from: '/docs/creating-charts-dashboards/first-dashboard',
           },
           {
@@ -112,20 +112,80 @@ const config = {
             from: '/docs/rest-api',
           },
           {
-            to: '/docs/installation/alerts-reports',
-            from: '/docs/installation/email-reports',
+            to: '/docs/configuration/alerts-reports',
+            from: '/docs/installation/alerts-reports',
+          },
+          {
+            to: '/docs/contributing/development',
+            from: '/docs/contributing/hooks-and-linting',
           },
           {
             to: '/docs/intro',
             from: '/docs/roadmap',
           },
           {
-            to: '/docs/contributing/contributing-page',
+            to: '/docs/contributing/',
             from: '/docs/contributing/contribution-guidelines',
           },
           {
-            to: '/docs/databases/yugabytedb',
+            to: '/docs/contributing/',
+            from: '/docs/contributing/contribution-page',
+          },
+          {
+            to: '/docs/configuration/databases',
             from: '/docs/databases/yugabyte/',
+          },
+          {
+            to: '/docs/faq',
+            from: '/docs/frequently-asked-questions',
+          },
+          {
+            to: '/docs/installation/kubernetes',
+            from: '/docs/installation/running-on-kubernetes/',
+          },
+          {
+            to: '/docs/contributing/howtos',
+            from: '/docs/contributing/testing-locally/',
+          },
+          {
+            to: '/docs/using-superset/creating-your-first-dashboard',
+            from: '/docs/creating-charts-dashboards/creating-your-first-dashboard/',
+          },
+          {
+            to: '/docs/using-superset/creating-your-first-dashboard',
+            from: '/docs/creating-charts-dashboards/exploring-data/',
+          },
+          {
+            to: '/docs/installation/docker-compose',
+            from: '/docs/installation/installing-superset-using-docker-compose/',
+          },
+          {
+            to: '/docs/contributing/howtos',
+            from: '/docs/contributing/creating-viz-plugins/',
+          },
+          {
+            to: '/docs/installation/kubernetes',
+            from: '/docs/installation/',
+          },
+          {
+            to: '/docs/installation/pypi',
+            from: '/docs/installation/installing-superset-from-pypi/',
+          },
+          {
+            to: '/docs/configuration/configuring-superset',
+            from: '/docs/installation/configuring-superset/',
+          },
+          {
+            to: '/docs/configuration/cache',
+            from: '/docs/installation/cache/',
+          },
+          {
+            to: '/docs/configuration/async-queries-celery',
+            from: '/docs/installation/async-queries-celery/',
+          },
+          {
+            to: '/docs/configuration/event-logging',
+            from: '/docs/installation/event-logging/',
           },
         ],
       },
@@ -139,7 +199,7 @@ const config = {
       ({
         docs: {
           sidebarPath: require.resolve('./sidebars.js'),
-          editUrl: 'https://github.com/apache/superset/tree/master/docs',
+          editUrl: 'https://github.com/apache/superset/edit/master/docs',
         },
         blog: {
           showReadingTime: true,
@@ -149,14 +209,6 @@ const config = {
         },
         theme: {
           customCss: require.resolve('./src/styles/custom.css'),
-        },
-        googleAnalytics: {
-          trackingID: 'G-133LHD3B3N',
-          anonymizeIP: true,
-        },
-        gtag: {
-          trackingID: 'G-133LHD3B3N',
-          anonymizeIP: true,
         },
       }),
     ],
@@ -171,7 +223,7 @@ const config = {
       },
       algolia: {
         appId: 'WR5FASX5ED',
-        apiKey: '299e4601d2fc5d0031bf9a0223c7f0c5',
+        apiKey: 'd0d22810f2e9b614ffac3a73b26891fe',
         indexName: 'superset-apache',
       },
       navbar: {
@@ -189,12 +241,8 @@ const config = {
                 to: '/docs/intro',
               },
               {
-                label: 'Tutorial',
-                to: '/docs/intro',
-              },
-              {
                 label: 'FAQ',
-                to: '/docs/frequently-asked-questions',
+                to: '/docs/faq',
               },
             ],
           },{
@@ -255,7 +303,7 @@ const config = {
           {
             href: 'https://github.com/a2i-data-team/data-leadership',
             position: 'right',
-            class: 'github-logo-container',
+            className: 'github-button',
           },
         ],
       },
@@ -276,7 +324,6 @@ const config = {
       //   </small>`,
       // },
       footer: {
-        style: 'dark',
         links: [],
         copyright: `Copyright © ${new Date().getFullYear()},
         © <a href="https://www.apache.org/" target="_blank" rel="noreferrer">Apache</a>,
@@ -287,8 +334,19 @@ const config = {
         theme: lightCodeTheme,
         darkTheme: darkCodeTheme,
       },
+      docs: {
+        sidebar: {
+          hideable: true,
+        }
+      },
     }),
-  scripts: ['/script/matomo.js'],
+  scripts: [
+    '/script/matomo.js',
+    // {
+    //   src: 'https://www.bugherd.com/sidebarv2.js?apikey=enilpiu7bgexxsnoqfjtxa',
+    //   async: true,
+    // },
+  ],
 };
 
 module.exports = config;

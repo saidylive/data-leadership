@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,22 +14,40 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import json
 import logging
+from collections.abc import Sequence
 from io import IOBase
-from typing import Sequence, Union
+from typing import List, Union
 
 import backoff
+import pandas as pd
+from deprecation import deprecated
+from flask import g
 from flask_babel import gettext as __
-from slack import WebClient
-from slack.errors import SlackApiError, SlackClientError
+from slack_sdk import WebClient
+from slack_sdk.errors import (
+    BotUserAccessError,
+    SlackApiError,
+    SlackClientConfigurationError,
+    SlackClientError,
+    SlackClientNotConnectedError,
+    SlackObjectFormationError,
+    SlackRequestError,
+    SlackTokenRotationError,
+)
 
-from superset import app
 from superset.reports.models import ReportRecipientType
 from superset.reports.notifications.base import BaseNotification
-from superset.reports.notifications.exceptions import NotificationError
+from superset.reports.notifications.exceptions import (
+    NotificationAuthorizationException,
+    NotificationMalformedException,
+    NotificationParamException,
+    NotificationUnprocessableException,
+)
+from superset.utils import json
+from superset.utils.core import get_email_address_list
 from superset.utils.decorators import statsd_gauge
-from superset.utils.urls import modify_url_query
+from superset.utils.slack import get_slack_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +62,27 @@ class SlackNotification(BaseNotification):  # pylint: disable=too-few-public-met
 
     type = ReportRecipientType.SLACK
 
-    def _get_channel(self) -> str:
-        return json.loads(self._recipient.recipient_config_json)["target"]
+    def _get_channels(self, client: WebClient) -> List[str]:
+        """
+        Get the recipient's channel(s).
+        :returns: A list of channel ids: "EID676L"
+        :raises SlackApiError: If the API call fails
+        """
+        recipient_str = json.loads(self._recipient.recipient_config_json)["target"]
+
+        channel_recipients: List[str] = get_email_address_list(recipient_str)
+
+        conversations_list_response = client.conversations_list(
+            types="public_channel,private_channel"
+        )
+
+        return [
+            c["id"]
+            for c in conversations_list_response["channels"]
+            if c["name"] in channel_recipients
+        ]
 
     def _message_template(self, table: str = "") -> str:
-        url = (
-            modify_url_query(self._content.url, standalone="0")
-            if self._content.url is not None
-            else ""
-        )
         return __(
             """*%(name)s*
 
@@ -65,7 +94,7 @@ class SlackNotification(BaseNotification):  # pylint: disable=too-few-public-met
 """,
             name=self._content.name,
             description=self._content.description or "",
-            url=url,
+            url=self._content.url,
             table=table,
         )
 
@@ -97,15 +126,19 @@ Error: %(text)s
 
         # Flatten columns/index so they show up nicely in the table
         df.columns = [
-            " ".join(str(name) for name in column).strip()
-            if isinstance(column, tuple)
-            else column
+            (
+                " ".join(str(name) for name in column).strip()
+                if isinstance(column, tuple)
+                else column
+            )
             for column in df.columns
         ]
         df.index = [
-            " ".join(str(name) for name in index).strip()
-            if isinstance(index, tuple)
-            else index
+            (
+                " ".join(str(name) for name in index).strip()
+                if isinstance(index, tuple)
+                else index
+            )
             for index in df.index
         ]
 
@@ -113,8 +146,9 @@ Error: %(text)s
         # need to truncate the data
         for i in range(len(df) - 1):
             truncated_df = df[: i + 1].fillna("")
-            truncated_df = truncated_df.append(
-                {k: "..." for k in df.columns}, ignore_index=True
+            truncated_row = pd.Series({k: "..." for k in df.columns})
+            truncated_df = pd.concat(
+                [truncated_df, truncated_row.to_frame().T], ignore_index=True
             )
             tabulated = df.to_markdown()
             table = f"```\n{tabulated}\n```\n\n(table was truncated)"
@@ -122,8 +156,9 @@ Error: %(text)s
             if len(message) > MAXIMUM_MESSAGE_SIZE:
                 # Decrement i and build a message that is under the limit
                 truncated_df = df[:i].fillna("")
-                truncated_df = truncated_df.append(
-                    {k: "..." for k in df.columns}, ignore_index=True
+                truncated_row = pd.Series({k: "..." for k in df.columns})
+                truncated_df = pd.concat(
+                    [truncated_df, truncated_row.to_frame().T], ignore_index=True
                 )
                 tabulated = df.to_markdown()
                 table = (
@@ -140,28 +175,40 @@ Error: %(text)s
 
         return self._message_template(table)
 
-    def _get_inline_files(self) -> Sequence[Union[str, IOBase, bytes]]:
+    def _get_inline_files(
+        self,
+    ) -> Sequence[Union[str, IOBase, bytes]]:
         if self._content.csv:
             return [self._content.csv]
         if self._content.screenshots:
             return self._content.screenshots
+        if self._content.pdf:
+            return [self._content.pdf]
         return []
 
-    @backoff.on_exception(backoff.expo, SlackApiError, factor=10, base=2, max_tries=5)
-    @statsd_gauge("reports.slack.send")
-    def send(self) -> None:
-        files = self._get_inline_files()
-        title = self._content.name
-        channel = self._get_channel()
-        body = self._get_body()
-        file_type = "csv" if self._content.csv else "png"
-        try:
-            token = app.config["SLACK_API_TOKEN"]
-            if callable(token):
-                token = token()
-            client = WebClient(token=token, proxy=app.config["SLACK_PROXY"])
-            # files_upload returns SlackResponse as we run it in sync mode.
-            if files:
+    @deprecated(deprecated_in="4.1")
+    def _deprecated_upload_files(
+        self, client: WebClient, title: str, body: str
+    ) -> None:
+        """
+        Deprecated method to upload files to slack
+        Should only be used if the new method fails
+        To be removed in the next major release
+        """
+        file_type, files = (None, [])
+        if self._content.csv:
+            file_type, files = ("csv", [self._content.csv])
+        if self._content.screenshots:
+            file_type, files = ("png", self._content.screenshots)
+        if self._content.pdf:
+            file_type, files = ("pdf", [self._content.pdf])
+
+        recipient_str = json.loads(self._recipient.recipient_config_json)["target"]
+
+        recipients = get_email_address_list(recipient_str)
+
+        for channel in recipients:
+            if len(files) > 0:
                 for file in files:
                     client.files_upload(
                         channels=channel,
@@ -172,6 +219,65 @@ Error: %(text)s
                     )
             else:
                 client.chat_postMessage(channel=channel, text=body)
-            logger.info("Report sent to slack")
+
+    @backoff.on_exception(backoff.expo, SlackApiError, factor=10, base=2, max_tries=5)
+    @statsd_gauge("reports.slack.send")
+    def send(self) -> None:
+        global_logs_context = getattr(g, "logs_context", {}) or {}
+        try:
+            client = get_slack_client()
+            title = self._content.name
+            body = self._get_body()
+
+            try:
+                channels = self._get_channels(client)
+            except SlackApiError:
+                logger.warning(
+                    "Slack scope missing. Using deprecated API to get channels. Please update your Slack app to use the new API.",
+                    extra={
+                        "execution_id": global_logs_context.get("execution_id"),
+                    },
+                )
+                self._deprecated_upload_files(client, title, body)
+                return
+
+            if channels == []:
+                raise NotificationParamException("No valid channel found")
+
+            files = self._get_inline_files()
+
+            # files_upload returns SlackResponse as we run it in sync mode.
+            for channel in channels:
+                if len(files) > 0:
+                    for file in files:
+                        client.files_upload_v2(
+                            channel=channel,
+                            file=file,
+                            initial_comment=body,
+                            title=title,
+                        )
+                else:
+                    client.chat_postMessage(channel=channel, text=body)
+
+            logger.info(
+                "Report sent to slack",
+                extra={
+                    "execution_id": global_logs_context.get("execution_id"),
+                },
+            )
+        except (
+            BotUserAccessError,
+            SlackRequestError,
+            SlackClientConfigurationError,
+        ) as ex:
+            raise NotificationParamException(str(ex)) from ex
+        except SlackObjectFormationError as ex:
+            raise NotificationMalformedException(str(ex)) from ex
+        except SlackTokenRotationError as ex:
+            raise NotificationAuthorizationException(str(ex)) from ex
+        except (SlackClientNotConnectedError, SlackApiError) as ex:
+            raise NotificationUnprocessableException(str(ex)) from ex
         except SlackClientError as ex:
-            raise NotificationError(ex) from ex
+            # this is the base class for all slack client errors
+            # keep it last so that it doesn't interfere with @backoff
+            raise NotificationUnprocessableException(str(ex)) from ex

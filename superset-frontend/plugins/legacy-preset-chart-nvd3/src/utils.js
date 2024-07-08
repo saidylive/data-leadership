@@ -19,7 +19,11 @@
 import d3 from 'd3';
 import d3tip from 'd3-tip';
 import dompurify from 'dompurify';
-import { smartDateFormatter, getNumberFormatter } from '@superset-ui/core';
+import {
+  SMART_DATE_ID,
+  getTimeFormatter,
+  getNumberFormatter,
+} from '@superset-ui/core';
 // Regexp for the label added to time shifted series
 // (1 hour offset, 2 days offset, etc.)
 const TIME_SHIFT_PATTERN = /\d+ \w+ offset/;
@@ -42,8 +46,8 @@ export function cleanColorInput(value) {
  * @param {*} format
  */
 export function getTimeOrNumberFormatter(format) {
-  return format === 'smart_date'
-    ? smartDateFormatter
+  return format === SMART_DATE_ID
+    ? getTimeFormatter(SMART_DATE_ID)
     : getNumberFormatter(format);
 }
 
@@ -191,19 +195,18 @@ export function generateAreaChartTooltipContent(
     '<tr class="tooltip-header"><td></td><td>Category</td><td>Value</td><td>% to total</td></tr>';
   d.series.forEach(series => {
     const key = getFormattedKey(series.key, true);
+    const isTotal = series.key === 'TOTAL';
     let trClass = '';
     if (series.highlight) {
       trClass = 'superset-legacy-chart-nvd3-tr-highlight';
-    } else if (series.key === 'TOTAL') {
+    } else if (isTotal) {
       trClass = 'superset-legacy-chart-nvd3-tr-total';
     }
     tooltip +=
       `<tr class="${trClass}" style="border-color: ${series.color}">` +
-      `<td style="color: ${series.color}">${
-        series.key === 'TOTAL' ? '' : '&#9724;'
-      }</td>` +
+      `<td style="color: ${series.color}">${isTotal ? '' : '&#9724;'}</td>` +
       `<td>${key}</td>` +
-      `<td>${valueFormatter(series.value)}</td>` +
+      `<td>${valueFormatter(isTotal ? total : series?.point?.y)}</td>` +
       `<td>${((100 * series.value) / total).toFixed(2)}%</td>` +
       '</tr>';
   });

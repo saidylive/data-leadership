@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { ModalFuncProps } from 'antd/lib/modal';
 import Modal, { ModalProps } from '.';
+import Button from '../Button';
 
 export default {
   title: 'Modal',
@@ -43,10 +44,15 @@ InteractiveModal.argTypes = {
   onHide: { action: 'onHide' },
 };
 
-InteractiveModal.story = {
-  parameters: {
-    knobs: {
-      disable: true,
-    },
-  },
+export const ModalFunctions = (props: ModalFuncProps) => (
+  <div>
+    <Button onClick={() => Modal.error(props)}>Error</Button>
+    <Button onClick={() => Modal.warning(props)}>Warning</Button>
+    <Button onClick={() => Modal.confirm(props)}>Confirm</Button>
+  </div>
+);
+
+ModalFunctions.args = {
+  title: 'Modal title',
+  content: 'Modal content',
 };

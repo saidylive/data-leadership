@@ -16,12 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, {
+import {
   useState,
   useMemo,
   forwardRef,
   useImperativeHandle,
+  type RefObject,
 } from 'react';
+
 import { t } from '@superset-ui/core';
 import { Select } from 'src/components';
 import { Filter, SelectOption } from 'src/components/ListView/types';
@@ -32,7 +34,7 @@ import { FilterContainer, BaseFilter, FilterHandler } from './Base';
 interface SelectFilterProps extends BaseFilter {
   fetchSelects?: Filter['fetchSelects'];
   name?: string;
-  onSelect: (selected: SelectOption | undefined) => void;
+  onSelect: (selected: SelectOption | undefined, isClear?: boolean) => void;
   paginate?: boolean;
   selects: Filter['selects'];
 }
@@ -46,7 +48,7 @@ function SelectFilter(
     onSelect,
     selects = [],
   }: SelectFilterProps,
-  ref: React.RefObject<FilterHandler>,
+  ref: RefObject<FilterHandler>,
 ) {
   const [selectedOption, setSelectedOption] = useState(initialValue);
 
@@ -58,7 +60,7 @@ function SelectFilter(
   };
 
   const onClear = () => {
-    onSelect(undefined);
+    onSelect(undefined, true);
     setSelectedOption(undefined);
   };
 

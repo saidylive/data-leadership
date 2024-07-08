@@ -28,12 +28,12 @@ export const sections = sectionsModule;
 export * from './components/InfoTooltipWithTrigger';
 export * from './components/ColumnOption';
 export * from './components/ColumnTypeLabel/ColumnTypeLabel';
+export * from './components/ControlSubSectionHeader';
+export * from './components/Dropdown';
+export * from './components/Menu';
 export * from './components/MetricOption';
+export * from './components/Tooltip';
 
-// React control components
-export { default as sharedControls, withDndFallback } from './shared-controls';
-export { default as sharedControlComponents } from './shared-controls/components';
-export { legacySortBy } from './shared-controls/legacySortBy';
-export * from './shared-controls/emitFilterControl';
-export * from './shared-controls/components';
+export * from './shared-controls';
 export * from './types';
+export * from './fixtures';

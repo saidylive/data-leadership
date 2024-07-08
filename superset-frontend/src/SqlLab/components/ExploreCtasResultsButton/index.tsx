@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { t, JsonObject } from '@superset-ui/core';
 import {
@@ -29,7 +28,7 @@ import Button from 'src/components/Button';
 import { exploreChart } from 'src/explore/exploreUtils';
 import { SqlLabRootState } from 'src/SqlLab/types';
 
-interface ExploreCtasResultsButtonProps {
+export interface ExploreCtasResultsButtonProps {
   table: string;
   schema?: string | null;
   dbId: number;
@@ -48,10 +47,10 @@ const ExploreCtasResultsButton = ({
   const dispatch = useDispatch<(dispatch: any) => Promise<JsonObject>>();
 
   const buildVizOptions = {
-    datasourceName: table,
+    table_name: table,
     schema,
-    dbId,
-    templateParams,
+    database_id: dbId,
+    template_params: templateParams,
   };
 
   const visualize = () => {
@@ -86,7 +85,7 @@ const ExploreCtasResultsButton = ({
       <InfoTooltipWithTrigger
         icon="line-chart"
         placement="top"
-        label="explore"
+        label={t('explore')}
       />{' '}
       {t('Explore')}
     </Button>

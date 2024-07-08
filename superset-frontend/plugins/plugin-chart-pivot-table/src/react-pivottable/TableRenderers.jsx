@@ -17,13 +17,18 @@
  * under the License.
  */
 
-import React from 'react';
+import { Component } from 'react';
+import { t } from '@superset-ui/core';
 import PropTypes from 'prop-types';
 import { PivotData, flatKey } from './utilities';
 import { Styles } from './Styles';
 
 const parseLabel = value => {
-  if (typeof value === 'number' || typeof value === 'string') {
+  if (typeof value === 'string') {
+    if (value === 'metric') return t('metric');
+    return value;
+  }
+  if (typeof value === 'number') {
     return value;
   }
   return String(value);
@@ -54,7 +59,7 @@ function displayHeaderCell(
   );
 }
 
-export class TableRenderer extends React.Component {
+export class TableRenderer extends Component {
   constructor(props) {
     super(props);
 
@@ -91,14 +96,14 @@ export class TableRenderer extends React.Component {
 
     const colSubtotalDisplay = {
       displayOnTop: false,
-      enabled: rowTotals,
+      enabled: tableOptions.colSubTotals,
       hideOnExpand: false,
       ...subtotalOptions.colSubtotalDisplay,
     };
 
     const rowSubtotalDisplay = {
       displayOnTop: false,
-      enabled: colTotals,
+      enabled: tableOptions.rowSubTotals,
       hideOnExpand: false,
       ...subtotalOptions.rowSubtotalDisplay,
     };
@@ -392,15 +397,19 @@ export class TableRenderer extends React.Component {
     // Iterate through columns. Jump over duplicate values.
     let i = 0;
     while (i < visibleColKeys.length) {
+      let handleContextMenu;
       const colKey = visibleColKeys[i];
       const colSpan = attrIdx < colKey.length ? colAttrSpans[i][attrIdx] : 1;
       let colLabelClass = 'pvtColLabel';
       if (attrIdx < colKey.length) {
-        if (
-          highlightHeaderCellsOnHover &&
-          !omittedHighlightHeaderGroups.includes(colAttrs[attrIdx])
-        ) {
-          colLabelClass += ' hoverable';
+        if (!omittedHighlightHeaderGroups.includes(colAttrs[attrIdx])) {
+          if (highlightHeaderCellsOnHover) {
+            colLabelClass += ' hoverable';
+          }
+          handleContextMenu = e =>
+            this.props.onContextMenu(e, colKey, undefined, {
+              [attrName]: colKey[attrIdx],
+            });
         }
         if (
           highlightedHeaderCells &&
@@ -426,6 +435,7 @@ export class TableRenderer extends React.Component {
             key={`colKey-${flatColKey}`}
             colSpan={colSpan}
             rowSpan={rowSpan}
+            role="columnheader button"
             onClick={this.clickHeaderHandler(
               pivotData,
               colKey,
@@ -433,6 +443,7 @@ export class TableRenderer extends React.Component {
               attrIdx,
               this.props.tableOptions.clickColumnHeaderCallback,
             )}
+            onContextMenu={handleContextMenu}
           >
             {displayHeaderCell(
               needToggle,
@@ -453,6 +464,7 @@ export class TableRenderer extends React.Component {
             key={`colKeyBuffer-${flatKey(colKey)}`}
             colSpan={colSpan}
             rowSpan={rowSpan}
+            role="columnheader button"
             onClick={this.clickHeaderHandler(
               pivotData,
               colKey,
@@ -462,7 +474,7 @@ export class TableRenderer extends React.Component {
               true,
             )}
           >
-            Subtotal
+            {t('Subtotal')}
           </th>,
         );
       }
@@ -476,6 +488,7 @@ export class TableRenderer extends React.Component {
           key="total"
           className="pvtTotalLabel"
           rowSpan={colAttrs.length + Math.min(rowAttrs.length, 1)}
+          role="columnheader button"
           onClick={this.clickHeaderHandler(
             pivotData,
             [],
@@ -486,7 +499,9 @@ export class TableRenderer extends React.Component {
             true,
           )}
         >
-          {`Total (${this.props.aggregatorName})`}
+          {t('Total (%(aggregatorName)s)', {
+            aggregatorName: t(this.props.aggregatorName),
+          })}
         </th>
       ) : null;
 
@@ -538,6 +553,7 @@ export class TableRenderer extends React.Component {
         <th
           className="pvtTotalLabel"
           key="padding"
+          role="columnheader button"
           onClick={this.clickHeaderHandler(
             pivotData,
             [],
@@ -549,7 +565,9 @@ export class TableRenderer extends React.Component {
           )}
         >
           {colAttrs.length === 0
-            ? `Total (${this.props.aggregatorName})`
+            ? t('Total (%(aggregatorName)s)', {
+                aggregatorName: t(this.props.aggregatorName),
+              })
             : null}
         </th>
       </tr>
@@ -585,12 +603,16 @@ export class TableRenderer extends React.Component {
 
     const colIncrSpan = colAttrs.length !== 0 ? 1 : 0;
     const attrValueCells = rowKey.map((r, i) => {
+      let handleContextMenu;
       let valueCellClassName = 'pvtRowLabel';
-      if (
-        highlightHeaderCellsOnHover &&
-        !omittedHighlightHeaderGroups.includes(rowAttrs[i])
-      ) {
-        valueCellClassName += ' hoverable';
+      if (!omittedHighlightHeaderGroups.includes(rowAttrs[i])) {
+        if (highlightHeaderCellsOnHover) {
+          valueCellClassName += ' hoverable';
+        }
+        handleContextMenu = e =>
+          this.props.onContextMenu(e, undefined, rowKey, {
+            [rowAttrs[i]]: r,
+          });
       }
       if (
         highlightedHeaderCells &&
@@ -619,6 +641,7 @@ export class TableRenderer extends React.Component {
             className={valueCellClassName}
             rowSpan={rowSpan}
             colSpan={colSpan}
+            role="columnheader button"
             onClick={this.clickHeaderHandler(
               pivotData,
               rowKey,
@@ -626,6 +649,7 @@ export class TableRenderer extends React.Component {
               i,
               this.props.tableOptions.clickRowHeaderCallback,
             )}
+            onContextMenu={handleContextMenu}
           >
             {displayHeaderCell(
               needRowToggle,
@@ -649,6 +673,7 @@ export class TableRenderer extends React.Component {
           key="rowKeyBuffer"
           colSpan={rowAttrs.length - rowKey.length + colIncrSpan}
           rowSpan={1}
+          role="columnheader button"
           onClick={this.clickHeaderHandler(
             pivotData,
             rowKey,
@@ -658,7 +683,7 @@ export class TableRenderer extends React.Component {
             true,
           )}
         >
-          Subtotal
+          {t('Subtotal')}
         </th>
       ) : null;
 
@@ -753,6 +778,7 @@ export class TableRenderer extends React.Component {
         key="label"
         className="pvtTotalLabel pvtRowTotalLabel"
         colSpan={rowAttrs.length + Math.min(colAttrs.length, 1)}
+        role="columnheader button"
         onClick={this.clickHeaderHandler(
           pivotData,
           [],
@@ -763,7 +789,9 @@ export class TableRenderer extends React.Component {
           true,
         )}
       >
-        {`Total (${this.props.aggregatorName})`}
+        {t('Total (%(aggregatorName)s)', {
+          aggregatorName: t(this.props.aggregatorName),
+        })}
       </th>
     );
 
@@ -826,6 +854,10 @@ export class TableRenderer extends React.Component {
     );
   }
 
+  isDashboardEditMode() {
+    return document.contains(document.querySelector('.dashboard--editing'));
+  }
+
   render() {
     if (this.cachedProps !== this.props) {
       this.cachedProps = this.props;
@@ -867,7 +899,7 @@ export class TableRenderer extends React.Component {
     };
 
     return (
-      <Styles>
+      <Styles isDashboardEditMode={this.isDashboardEditMode()}>
         <table className="pvtTable" role="grid">
           <thead>
             {colAttrs.map((c, j) =>

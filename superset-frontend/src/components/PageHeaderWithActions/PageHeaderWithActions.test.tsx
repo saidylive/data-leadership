@@ -17,13 +17,10 @@
  * under the License.
  */
 
-import React from 'react';
 import { render, screen } from 'spec/helpers/testing-library';
 import userEvent from '@testing-library/user-event';
 import { PageHeaderWithActions, PageHeaderWithActionsProps } from './index';
 import { Menu } from '../Menu';
-
-jest.mock('src/components/Icons/Icon', () => () => <span />);
 
 const defaultProps: PageHeaderWithActionsProps = {
   editableTitleProps: {

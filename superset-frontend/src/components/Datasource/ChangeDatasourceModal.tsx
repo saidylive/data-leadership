@@ -16,15 +16,22 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, {
+import {
   FunctionComponent,
   useState,
   useRef,
   useEffect,
   useCallback,
+  ChangeEvent,
 } from 'react';
+
 import Alert from 'src/components/Alert';
-import { SupersetClient, t, styled } from '@superset-ui/core';
+import {
+  SupersetClient,
+  t,
+  styled,
+  getClientErrorObject,
+} from '@superset-ui/core';
 import TableView, { EmptyWrapperType } from 'src/components/TableView';
 import { ServerPagination, SortByType } from 'src/components/TableView/types';
 import StyledModal from 'src/components/Modal';
@@ -33,14 +40,13 @@ import { useListViewResource } from 'src/views/CRUD/hooks';
 import Dataset from 'src/types/Dataset';
 import { useDebouncedEffect } from 'src/explore/exploreUtils';
 import { SLOW_DEBOUNCE } from 'src/constants';
-import { getClientErrorObject } from 'src/utils/getClientErrorObject';
 import Loading from 'src/components/Loading';
 import { AntdInput } from 'src/components';
 import { Input } from 'src/components/Input';
 import {
   PAGE_SIZE as DATASET_PAGE_SIZE,
   SORT_BY as DATASET_SORT_BY,
-} from 'src/views/CRUD/data/dataset/constants';
+} from 'src/features/datasets/constants';
 import withToasts from 'src/components/MessageToasts/withToasts';
 import FacePile from '../FacePile';
 
@@ -165,7 +171,7 @@ const ChangeDatasourceModal: FunctionComponent<ChangeDatasourceModalProps> = ({
     show,
   ]);
 
-  const changeSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const changeSearch = (event: ChangeEvent<HTMLInputElement>) => {
     const searchValue = event.target.value ?? '';
     setFilter(searchValue);
     setPageIndex(0);
@@ -173,10 +179,12 @@ const ChangeDatasourceModal: FunctionComponent<ChangeDatasourceModalProps> = ({
 
   const handleChangeConfirm = () => {
     SupersetClient.get({
-      endpoint: `/datasource/get/${confirmedDataset?.type}/${confirmedDataset?.id}/`,
+      endpoint: `/api/v1/dataset/${confirmedDataset?.id}`,
     })
       .then(({ json }) => {
-        onDatasourceSave(json);
+        // eslint-disable-next-line no-param-reassign
+        json.result.type = 'table';
+        onDatasourceSave(json.result);
         onChange(`${confirmedDataset?.id}__table`);
       })
       .catch(response => {
@@ -190,7 +198,7 @@ const ChangeDatasourceModal: FunctionComponent<ChangeDatasourceModalProps> = ({
         );
       });
     onHide();
-    addSuccessToast('Successfully changed dataset!');
+    addSuccessToast(t('Successfully changed dataset!'));
   };
 
   const handlerCancelConfirm = () => {
@@ -251,7 +259,7 @@ const ChangeDatasourceModal: FunctionComponent<ChangeDatasourceModalProps> = ({
       show={show}
       onHide={onHide}
       responsive
-      title={t('Change dataset')}
+      title={t('Swap dataset')}
       width={confirmChange ? '432px' : ''}
       height={confirmChange ? 'auto' : '540px'}
       hideFooter={!confirmChange}
@@ -260,13 +268,13 @@ const ChangeDatasourceModal: FunctionComponent<ChangeDatasourceModalProps> = ({
           {confirmChange && (
             <ConfirmModalStyled>
               <div className="btn-container">
-                <Button onClick={handlerCancelConfirm}>Cancel</Button>
+                <Button onClick={handlerCancelConfirm}>{t('Cancel')}</Button>
                 <Button
                   className="proceed-btn"
                   buttonStyle="primary"
                   onClick={handleChangeConfirm}
                 >
-                  Proceed
+                  {t('Proceed')}
                 </Button>
               </div>
             </ConfirmModalStyled>

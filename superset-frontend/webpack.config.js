@@ -26,7 +26,6 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const SpeedMeasurePlugin = require('speed-measure-webpack-plugin');
-const createMdxCompiler = require('@storybook/addon-docs/mdx-compiler-plugin');
 const {
   WebpackManifestPlugin,
   getCompilerHooks,
@@ -75,7 +74,7 @@ if (!isDevMode) {
 
 const plugins = [
   new webpack.ProvidePlugin({
-    process: 'process/browser',
+    process: 'process/browser.js',
   }),
 
   // creates a manifest.json mapping of name to hashed output used in template files
@@ -98,17 +97,16 @@ const plugins = [
             .filter(x => x.endsWith('.css'))
             .map(x => `${output.publicPath}${x}`),
           js: chunks
-            .filter(x => x.endsWith('.js'))
+            .filter(x => x.endsWith('.js') && x.match(/(?<!hot-update).js$/))
             .map(x => `${output.publicPath}${x}`),
         };
       });
-
       return {
         ...seed,
         entrypoints: entryFiles,
       };
     },
-    // Also write maniafest.json to disk when running `npm run dev`.
+    // Also write manifest.json to disk when running `npm run dev`.
     // This is required for Flask to work.
     writeToFileEmit: isDevMode && !isDevServer,
   }),
@@ -116,6 +114,9 @@ const plugins = [
   // expose mode variable to other modules
   new webpack.DefinePlugin({
     'process.env.WEBPACK_MODE': JSON.stringify(mode),
+    'process.env.REDUX_DEFAULT_MIDDLEWARE':
+      process.env.REDUX_DEFAULT_MIDDLEWARE,
+    'process.env.SCARF_ANALYTICS': JSON.stringify(process.env.SCARF_ANALYTICS),
   }),
 
   new CopyPlugin({
@@ -190,10 +191,18 @@ const babelLoader = {
     // disable gzip compression for cache files
     // faster when there are millions of small files
     cacheCompression: false,
-    plugins: ['emotion'],
     presets: [
       [
-        '@emotion/babel-preset-css-prop',
+        '@babel/preset-react',
+        {
+          runtime: 'automatic',
+          importSource: '@emotion/react',
+        },
+      ],
+    ],
+    plugins: [
+      [
+        '@emotion/babel-plugin',
         {
           autoLabel: 'dev-only',
           labelFormat: '[local]',
@@ -210,12 +219,29 @@ const config = {
     menu: addPreamble('src/views/menu.tsx'),
     spa: addPreamble('/src/views/index.tsx'),
     embedded: addPreamble('/src/embedded/index.tsx'),
-    sqllab: addPreamble('/src/SqlLab/index.tsx'),
-    profile: addPreamble('/src/profile/index.tsx'),
-    showSavedQuery: [path.join(APP_DIR, '/src/showSavedQuery/index.jsx')],
+  },
+  cache: {
+    type: 'filesystem', // Enable filesystem caching
+    cacheDirectory: path.resolve(__dirname, '.temp_cache'),
+    buildDependencies: {
+      config: [__filename],
+    },
   },
   output,
   stats: 'minimal',
+  /*
+   Silence warning for missing export in @data-ui's internal structure. This
+   issue arises from an internal implementation detail of @data-ui. As it's
+   non-critical, we suppress it to prevent unnecessary clutter in the build
+   output. For more context, refer to:
+   https://github.com/williaster/data-ui/issues/208#issuecomment-946966712
+   */
+  ignoreWarnings: [
+    {
+      message:
+        /export 'withTooltipPropTypes' \(imported as 'vxTooltipPropTypes'\) was not found/,
+    },
+  ],
   performance: {
     assetFilter(assetFilename) {
       // don't throw size limit warning on geojson and font files
@@ -248,9 +274,7 @@ const config = {
               'redux',
               'react-redux',
               'react-hot-loader',
-              'react-select',
               'react-sortable-hoc',
-              'react-virtualized',
               'react-table',
               'react-ace',
               '@hot-loader.*',
@@ -289,6 +313,15 @@ const config = {
       //  AntD version conflict has been resolved
       antd: path.resolve(path.join(APP_DIR, './node_modules/antd')),
       react: path.resolve(path.join(APP_DIR, './node_modules/react')),
+      // TODO: remove Handlebars alias once Handlebars NPM package has been updated to
+      // correctly support webpack import (https://github.com/handlebars-lang/handlebars.js/issues/953)
+      handlebars: 'handlebars/dist/handlebars.js',
+      /*
+      Temporary workaround to prevent Webpack from resolving moment locale
+      files, which are unnecessary for this project and causing build warnings.
+      This prevents "Module not found" errors for moment locale files.
+      */
+      'moment/min/moment-with-locales': false,
     },
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.yml'],
     fallback: {
@@ -322,7 +355,7 @@ const config = {
               transpileOnly: true,
               // must override compiler options here, even though we have set
               // the same options in `tsconfig.json`, because they may still
-              // be overriden by `tsconfig.json` in node_modules subdirectories.
+              // be overridden by `tsconfig.json` in node_modules subdirectories.
               compilerOptions: {
                 esModuleInterop: false,
                 importHelpers: false,
@@ -345,6 +378,10 @@ const config = {
           /@encodable/,
         ],
         use: [babelLoader],
+      },
+      {
+        test: /ace-builds.*\/worker-.*$/,
+        type: 'asset/resource',
       },
       // react-hot-loader use "ProxyFacade", which is a wrapper for react Component
       // see https://github.com/gaearon/react-hot-loader/issues/1311
@@ -384,6 +421,9 @@ const config = {
               sourceMap: true,
               lessOptions: {
                 javascriptEnabled: true,
+                modifyVars: {
+                  'root-entry-name': 'default',
+                },
               },
             },
           },
@@ -397,7 +437,7 @@ const config = {
         },
         type: 'asset',
         generator: {
-          filename: '[name].[contenthash:8].[ext]',
+          filename: '[name].[contenthash:8][ext]',
         },
       },
       {
@@ -412,12 +452,11 @@ const config = {
           {
             loader: '@svgr/webpack',
             options: {
-              svgoConfig: {
-                plugins: {
-                  removeViewBox: false,
-                  icon: true,
-                },
-              },
+              titleProp: true,
+              ref: true,
+              // this is the default value for the icon. Using other values
+              // here will replace width and height in svg with 1em
+              icon: false,
             },
           },
         ],
@@ -426,7 +465,7 @@ const config = {
         test: /\.(jpg|gif)$/,
         type: 'asset/resource',
         generator: {
-          filename: '[name].[contenthash:8].[ext]',
+          filename: '[name].[contenthash:8][ext]',
         },
       },
       /* for font-awesome */
@@ -443,24 +482,20 @@ const config = {
         test: /\.geojson$/,
         type: 'asset/resource',
       },
-      {
-        test: /\.(stories|story)\.mdx$/,
-        use: [
-          {
-            loader: 'babel-loader',
-            // may or may not need this line depending on your app's setup
-            options: {
-              plugins: ['@babel/plugin-transform-react-jsx'],
-            },
-          },
-          {
-            loader: '@mdx-js/loader',
-            options: {
-              compilers: [createMdxCompiler({})],
-            },
-          },
-        ],
-      },
+      // {
+      //   test: /\.mdx?$/,
+      //   use: [
+      //     {
+      //       loader: require.resolve('@storybook/mdx2-csf/loader'),
+      //       options: {
+      //         skipCsf: false,
+      //         mdxCompileOptions: {
+      //           remarkPlugins: [remarkGfm],
+      //         },
+      //       },
+      //     },
+      //   ],
+      // },
     ],
   },
   externals: {
@@ -506,7 +541,11 @@ if (isDevMode) {
       () => proxyConfig,
     ],
     client: {
-      overlay: { errors: true, warnings: false },
+      overlay: {
+        errors: true,
+        warnings: false,
+        runtimeErrors: error => !/ResizeObserver/.test(error.message),
+      },
       logging: 'error',
     },
     static: path.join(process.cwd(), '../static/assets'),

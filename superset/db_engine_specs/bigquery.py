@@ -14,40 +14,63 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import json
+
+from __future__ import annotations
+
+import contextlib
 import re
 import urllib
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Pattern, Tuple, Type, TYPE_CHECKING
+from re import Pattern
+from typing import Any, TYPE_CHECKING, TypedDict
 
 import pandas as pd
 from apispec import APISpec
 from apispec.ext.marshmallow import MarshmallowPlugin
+from deprecation import deprecated
 from flask_babel import gettext as __
 from marshmallow import fields, Schema
 from marshmallow.exceptions import ValidationError
-from sqlalchemy import column
+from sqlalchemy import column, types
 from sqlalchemy.engine.base import Engine
+from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy.engine.url import URL
 from sqlalchemy.sql import sqltypes
-from typing_extensions import TypedDict
 
-from superset.constants import PASSWORD_MASK
+from superset import sql_parse
+from superset.constants import PASSWORD_MASK, TimeGrain
 from superset.databases.schemas import encrypted_field_properties, EncryptedString
 from superset.databases.utils import make_url_safe
-from superset.db_engine_specs.base import BaseEngineSpec
-from superset.db_engine_specs.exceptions import SupersetDBAPIDisconnectionError
+from superset.db_engine_specs.base import BaseEngineSpec, BasicPropertiesType
+from superset.db_engine_specs.exceptions import SupersetDBAPIConnectionError
 from superset.errors import SupersetError, SupersetErrorType
+from superset.exceptions import SupersetException
 from superset.sql_parse import Table
-from superset.utils import core as utils
+from superset.superset_typing import ResultSetColumnType
+from superset.utils import core as utils, json
 from superset.utils.hashing import md5_sha_from_str
+
+try:
+    from google.cloud import bigquery
+    from google.oauth2 import service_account
+
+    dependencies_installed = True
+except ImportError:
+    dependencies_installed = False
+
+try:
+    import pandas_gbq
+
+    can_upload = True
+except ModuleNotFoundError:
+    can_upload = False
 
 if TYPE_CHECKING:
     from superset.models.core import Database  # pragma: no cover
 
-
 CONNECTION_DATABASE_PERMISSIONS_REGEX = re.compile(
-    "Access Denied: Project User does not have bigquery.jobs.create "
-    + "permission in project (?P<project>.+?)"
+    "Access Denied: Project (?P<project_name>.+?): User does not have "
+    + "bigquery.jobs.create permission in project (?P<project>.+?)"
 )
 
 TABLE_DOES_NOT_EXIST_REGEX = re.compile(
@@ -74,17 +97,17 @@ ma_plugin = MarshmallowPlugin()
 class BigQueryParametersSchema(Schema):
     credentials_info = EncryptedString(
         required=False,
-        description="Contents of BigQuery JSON credentials.",
+        metadata={"description": "Contents of BigQuery JSON credentials."},
     )
     query = fields.Dict(required=False)
 
 
 class BigQueryParametersType(TypedDict):
-    credentials_info: Dict[str, Any]
-    query: Dict[str, Any]
+    credentials_info: dict[str, Any]
+    query: dict[str, Any]
 
 
-class BigQueryEngineSpec(BaseEngineSpec):
+class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-methods
     """Engine spec for Google's BigQuery
 
     As contributed by @mxmzdlv on issue #945"""
@@ -92,6 +115,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
     engine = "bigquery"
     engine_name = "Google BigQuery"
     max_column_name_length = 128
+    disable_ssh_tunneling = True
 
     parameters_schema = BigQueryParametersSchema()
     default_driver = "bigquery"
@@ -103,15 +127,17 @@ class BigQueryEngineSpec(BaseEngineSpec):
 
     allows_hidden_cc_in_orderby = True
 
+    supports_catalog = supports_dynamic_catalog = True
+
     """
     https://www.python.org/dev/peps/pep-0249/#arraysize
-    raw_connections bypass the pybigquery query execution context and deal with
+    raw_connections bypass the sqlalchemy-bigquery query execution context and deal with
     raw dbapi connection directly.
     If this value is not set, the default value is set to 1, as described here,
     https://googlecloudplatform.github.io/google-cloud-python/latest/_modules/google/cloud/bigquery/dbapi/cursor.html#Cursor
 
-    The default value of 5000 is derived from the pybigquery.
-    https://github.com/mxmzdlv/pybigquery/blob/d214bb089ca0807ca9aaa6ce4d5a01172d40264e/pybigquery/sqlalchemy_bigquery.py#L102
+    The default value of 5000 is derived from the sqlalchemy-bigquery.
+    https://github.com/googleapis/python-bigquery-sqlalchemy/blob/4e17259088f89eac155adc19e0985278a29ecf9c/sqlalchemy_bigquery/base.py#L762
     """
     arraysize = 5000
 
@@ -124,39 +150,42 @@ class BigQueryEngineSpec(BaseEngineSpec):
 
     _time_grain_expressions = {
         None: "{col}",
-        "PT1S": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.SECOND: "CAST(TIMESTAMP_SECONDS("
         "UNIX_SECONDS(CAST({col} AS TIMESTAMP))"
         ") AS {type})",
-        "PT1M": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.MINUTE: "CAST(TIMESTAMP_SECONDS("
         "60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 60)"
         ") AS {type})",
-        "PT5M": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.FIVE_MINUTES: "CAST(TIMESTAMP_SECONDS("
         "5*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 5*60)"
         ") AS {type})",
-        "PT10M": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.TEN_MINUTES: "CAST(TIMESTAMP_SECONDS("
         "10*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 10*60)"
         ") AS {type})",
-        "PT15M": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.FIFTEEN_MINUTES: "CAST(TIMESTAMP_SECONDS("
         "15*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 15*60)"
         ") AS {type})",
-        "PT30M": "CAST(TIMESTAMP_SECONDS("
+        TimeGrain.THIRTY_MINUTES: "CAST(TIMESTAMP_SECONDS("
         "30*60 * DIV(UNIX_SECONDS(CAST({col} AS TIMESTAMP)), 30*60)"
         ") AS {type})",
-        "PT1H": "{func}({col}, HOUR)",
-        "P1D": "{func}({col}, DAY)",
-        "P1W": "{func}({col}, WEEK)",
-        "1969-12-29T00:00:00Z/P1W": "{func}({col}, ISOWEEK)",
-        "P1M": "{func}({col}, MONTH)",
-        "P3M": "{func}({col}, QUARTER)",
-        "P1Y": "{func}({col}, YEAR)",
+        TimeGrain.HOUR: "{func}({col}, HOUR)",
+        TimeGrain.DAY: "{func}({col}, DAY)",
+        TimeGrain.WEEK: "{func}({col}, WEEK)",
+        TimeGrain.WEEK_STARTING_MONDAY: "{func}({col}, ISOWEEK)",
+        TimeGrain.MONTH: "{func}({col}, MONTH)",
+        TimeGrain.QUARTER: "{func}({col}, QUARTER)",
+        TimeGrain.YEAR: "{func}({col}, YEAR)",
     }
 
-    custom_errors: Dict[Pattern[str], Tuple[str, SupersetErrorType, Dict[str, Any]]] = {
+    custom_errors: dict[Pattern[str], tuple[str, SupersetErrorType, dict[str, Any]]] = {
         CONNECTION_DATABASE_PERMISSIONS_REGEX: (
             __(
-                "We were unable to connect to your database. Please "
-                "confirm that your service account has the Viewer "
-                "and Job User roles on the project."
+                "Unable to connect. Verify that the following roles are set "
+                'on the service account: "BigQuery Data Viewer", '
+                '"BigQuery Metadata Viewer", "BigQuery Job User" '
+                "and the following permissions are set "
+                '"bigquery.readsessions.create", '
+                '"bigquery.readsessions.getData"'
             ),
             SupersetErrorType.CONNECTION_DATABASE_PERMISSIONS_ERROR,
             {},
@@ -194,23 +223,21 @@ class BigQueryEngineSpec(BaseEngineSpec):
 
     @classmethod
     def convert_dttm(
-        cls, target_type: str, dttm: datetime, db_extra: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
-        tt = target_type.upper()
-        if tt == utils.TemporalType.DATE:
+        cls, target_type: str, dttm: datetime, db_extra: dict[str, Any] | None = None
+    ) -> str | None:
+        sqla_type = cls.get_sqla_column_type(target_type)
+        if isinstance(sqla_type, types.Date):
             return f"CAST('{dttm.date().isoformat()}' AS DATE)"
-        if tt == utils.TemporalType.DATETIME:
-            return f"""CAST('{dttm.isoformat(timespec="microseconds")}' AS DATETIME)"""
-        if tt == utils.TemporalType.TIME:
-            return f"""CAST('{dttm.strftime("%H:%M:%S.%f")}' AS TIME)"""
-        if tt == utils.TemporalType.TIMESTAMP:
+        if isinstance(sqla_type, types.TIMESTAMP):
             return f"""CAST('{dttm.isoformat(timespec="microseconds")}' AS TIMESTAMP)"""
+        if isinstance(sqla_type, types.DateTime):
+            return f"""CAST('{dttm.isoformat(timespec="microseconds")}' AS DATETIME)"""
+        if isinstance(sqla_type, types.Time):
+            return f"""CAST('{dttm.strftime("%H:%M:%S.%f")}' AS TIME)"""
         return None
 
     @classmethod
-    def fetch_data(
-        cls, cursor: Any, limit: Optional[int] = None
-    ) -> List[Tuple[Any, ...]]:
+    def fetch_data(cls, cursor: Any, limit: int | None = None) -> list[tuple[Any, ...]]:
         data = super().fetch_data(cursor, limit)
         # Support type BigQuery Row, introduced here PR #4071
         # google.cloud.bigquery.table.Row
@@ -254,7 +281,8 @@ class BigQueryEngineSpec(BaseEngineSpec):
         return "_" + md5_sha_from_str(label)
 
     @classmethod
-    def normalize_indexes(cls, indexes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    @deprecated(deprecated_in="3.0")
+    def normalize_indexes(cls, indexes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Normalizes indexes for more consistency across db engines
 
@@ -273,10 +301,30 @@ class BigQueryEngineSpec(BaseEngineSpec):
         return normalized_idxs
 
     @classmethod
-    def extra_table_metadata(
-        cls, database: "Database", table_name: str, schema_name: Optional[str]
-    ) -> Dict[str, Any]:
-        indexes = database.get_indexes(table_name, schema_name)
+    def get_indexes(
+        cls,
+        database: Database,
+        inspector: Inspector,
+        table: Table,
+    ) -> list[dict[str, Any]]:
+        """
+        Get the indexes associated with the specified schema/table.
+
+        :param database: The database to inspect
+        :param inspector: The SQLAlchemy inspector
+        :param table: The table instance to inspect
+        :returns: The indexes
+        """
+
+        return cls.normalize_indexes(inspector.get_indexes(table.table, table.schema))
+
+    @classmethod
+    def get_extra_table_metadata(
+        cls,
+        database: Database,
+        table: Table,
+    ) -> dict[str, Any]:
+        indexes = database.get_indexes(table)
         if not indexes:
             return {}
         partitions_columns = [
@@ -305,10 +353,10 @@ class BigQueryEngineSpec(BaseEngineSpec):
     @classmethod
     def df_to_sql(
         cls,
-        database: "Database",
+        database: Database,
         table: Table,
         df: pd.DataFrame,
-        to_sql_kwargs: Dict[str, Any],
+        to_sql_kwargs: dict[str, Any],
     ) -> None:
         """
         Upload data from a Pandas DataFrame to a database.
@@ -322,31 +370,31 @@ class BigQueryEngineSpec(BaseEngineSpec):
         :param df: The dataframe with data to be uploaded
         :param to_sql_kwargs: The kwargs to be passed to pandas.DataFrame.to_sql` method
         """
-
-        try:
-            # pylint: disable=import-outside-toplevel
-            import pandas_gbq
-            from google.oauth2 import service_account
-        except ImportError as ex:
-            raise Exception(
-                "Could not import libraries `pandas_gbq` or `google.oauth2`, which are "
-                "required to be installed in your environment in order "
-                "to upload data to BigQuery"
-            ) from ex
+        if not can_upload:
+            raise SupersetException(
+                "Could not import libraries needed to upload data to BigQuery."
+            )
 
         if not table.schema:
-            raise Exception("The table schema must be defined")
+            raise SupersetException("The table schema must be defined")
 
-        engine = cls.get_engine(database)
-        to_gbq_kwargs = {"destination_table": str(table), "project_id": engine.url.host}
+        to_gbq_kwargs = {}
+        with cls.get_engine(
+            database,
+            catalog=table.catalog,
+            schema=table.schema,
+        ) as engine:
+            to_gbq_kwargs = {
+                "destination_table": str(table),
+                "project_id": engine.url.host,
+            }
 
         # Add credentials if they are set on the SQLAlchemy dialect.
-        creds = engine.dialect.credentials_info
 
-        if creds:
-            to_gbq_kwargs[
-                "credentials"
-            ] = service_account.Credentials.from_service_account_info(creds)
+        if creds := engine.dialect.credentials_info:
+            to_gbq_kwargs["credentials"] = (
+                service_account.Credentials.from_service_account_info(creds)
+            )
 
         # Only pass through supported kwargs.
         supported_kwarg_keys = {"if_exists"}
@@ -358,10 +406,161 @@ class BigQueryEngineSpec(BaseEngineSpec):
         pandas_gbq.to_gbq(df, **to_gbq_kwargs)
 
     @classmethod
+    def _get_client(cls, engine: Engine) -> bigquery.Client:
+        """
+        Return the BigQuery client associated with an engine.
+        """
+        if not dependencies_installed:
+            raise SupersetException(
+                "Could not import libraries needed to connect to BigQuery."
+            )
+
+        credentials = service_account.Credentials.from_service_account_info(
+            engine.dialect.credentials_info
+        )
+        return bigquery.Client(credentials=credentials)
+
+    @classmethod
+    def estimate_query_cost(  # pylint: disable=too-many-arguments
+        cls,
+        database: Database,
+        catalog: str | None,
+        schema: str,
+        sql: str,
+        source: utils.QuerySource | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Estimate the cost of a multiple statement SQL query.
+
+        :param database: Database instance
+        :param catalog: Database project
+        :param schema: Database schema
+        :param sql: SQL query with possibly multiple statements
+        :param source: Source of the query (eg, "sql_lab")
+        """
+        extra = database.get_extra() or {}
+        if not cls.get_allow_cost_estimate(extra):
+            raise SupersetException("Database does not support cost estimation")
+
+        parsed_query = sql_parse.ParsedQuery(sql, engine=cls.engine)
+        statements = parsed_query.get_statements()
+
+        with cls.get_engine(
+            database,
+            catalog=catalog,
+            schema=schema,
+        ) as engine:
+            client = cls._get_client(engine)
+            return [
+                cls.custom_estimate_statement_cost(
+                    cls.process_statement(statement, database),
+                    client,
+                )
+                for statement in statements
+            ]
+
+    @classmethod
+    def get_default_catalog(cls, database: Database) -> str | None:
+        """
+        Get the default catalog.
+        """
+        url = database.url_object
+
+        # The SQLAlchemy driver accepts both `bigquery://project` (where the project is
+        # technically a host) and `bigquery:///project` (where it's a database). But
+        # both can be missing, and the project is inferred from the authentication
+        # credentials.
+        if project := url.host or url.database:
+            return project
+
+        with database.get_sqla_engine() as engine:
+            client = cls._get_client(engine)
+            return client.project
+
+    @classmethod
+    def get_catalog_names(
+        cls,
+        database: Database,
+        inspector: Inspector,
+    ) -> set[str]:
+        """
+        Get all catalogs.
+
+        In BigQuery, a catalog is called a "project".
+        """
+        engine: Engine
+        with database.get_sqla_engine() as engine:
+            client = cls._get_client(engine)
+            projects = client.list_projects()
+
+        return {project.project_id for project in projects}
+
+    @classmethod
+    def adjust_engine_params(
+        cls,
+        uri: URL,
+        connect_args: dict[str, Any],
+        catalog: str | None = None,
+        schema: str | None = None,
+    ) -> tuple[URL, dict[str, Any]]:
+        if catalog:
+            uri = uri.set(host=catalog, database="")
+
+        return uri, connect_args
+
+    @classmethod
+    def get_allow_cost_estimate(cls, extra: dict[str, Any]) -> bool:
+        return True
+
+    @classmethod
+    def custom_estimate_statement_cost(
+        cls,
+        statement: str,
+        client: bigquery.Client,
+    ) -> dict[str, Any]:
+        """
+        Custom version that receives a client instead of a cursor.
+        """
+        job_config = bigquery.QueryJobConfig(dry_run=True)
+        query_job = client.query(statement, job_config=job_config)
+
+        # Format Bytes.
+        # TODO: Humanize in case more db engine specs need to be added,
+        # this should be made a function outside this scope.
+        byte_division = 1024
+        if hasattr(query_job, "total_bytes_processed"):
+            query_bytes_processed = query_job.total_bytes_processed
+            if query_bytes_processed // byte_division == 0:
+                byte_type = "B"
+                total_bytes_processed = query_bytes_processed
+            elif query_bytes_processed // (byte_division**2) == 0:
+                byte_type = "KB"
+                total_bytes_processed = round(query_bytes_processed / byte_division, 2)
+            elif query_bytes_processed // (byte_division**3) == 0:
+                byte_type = "MB"
+                total_bytes_processed = round(
+                    query_bytes_processed / (byte_division**2), 2
+                )
+            else:
+                byte_type = "GB"
+                total_bytes_processed = round(
+                    query_bytes_processed / (byte_division**3), 2
+                )
+
+            return {f"{byte_type} Processed": total_bytes_processed}
+        return {}
+
+    @classmethod
+    def query_cost_formatter(
+        cls, raw_cost: list[dict[str, Any]]
+    ) -> list[dict[str, str]]:
+        return [{k: str(v) for k, v in row.items()} for row in raw_cost]
+
+    @classmethod
     def build_sqlalchemy_uri(
         cls,
         parameters: BigQueryParametersType,
-        encrypted_extra: Optional[Dict[str, Any]] = None,
+        encrypted_extra: dict[str, Any] | None = None,
     ) -> str:
         query = parameters.get("query", {})
         query_params = urllib.parse.urlencode(query)
@@ -383,7 +582,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
     def get_parameters_from_uri(
         cls,
         uri: str,
-        encrypted_extra: Optional[Dict[str, Any]] = None,
+        encrypted_extra: dict[str, Any] | None = None,
     ) -> Any:
         value = make_url_safe(uri)
 
@@ -396,28 +595,31 @@ class BigQueryEngineSpec(BaseEngineSpec):
         raise ValidationError("Invalid service credentials")
 
     @classmethod
-    def mask_encrypted_extra(cls, encrypted_extra: str) -> str:
-        try:
-            config = json.loads(encrypted_extra)
-        except json.JSONDecodeError:
+    def mask_encrypted_extra(cls, encrypted_extra: str | None) -> str | None:
+        if encrypted_extra is None:
             return encrypted_extra
 
         try:
-            config["credentials_info"]["private_key"] = PASSWORD_MASK
-        except KeyError:
-            pass
+            config = json.loads(encrypted_extra)
+        except (json.JSONDecodeError, TypeError):
+            return encrypted_extra
 
+        with contextlib.suppress(KeyError):
+            config["credentials_info"]["private_key"] = PASSWORD_MASK
         return json.dumps(config)
 
     @classmethod
-    def unmask_encrypted_extra(cls, old: str, new: str) -> str:
+    def unmask_encrypted_extra(cls, old: str | None, new: str | None) -> str | None:
         """
         Reuse ``private_key`` if available and unchanged.
         """
+        if old is None or new is None:
+            return new
+
         try:
             old_config = json.loads(old)
             new_config = json.loads(new)
-        except json.JSONDecodeError:
+        except (TypeError, json.JSONDecodeError):
             return new
 
         if "credentials_info" not in new_config:
@@ -434,16 +636,17 @@ class BigQueryEngineSpec(BaseEngineSpec):
         return json.dumps(new_config)
 
     @classmethod
-    def get_dbapi_exception_mapping(cls) -> Dict[Type[Exception], Type[Exception]]:
+    def get_dbapi_exception_mapping(cls) -> dict[type[Exception], type[Exception]]:
         # pylint: disable=import-outside-toplevel
         from google.auth.exceptions import DefaultCredentialsError
 
-        return {DefaultCredentialsError: SupersetDBAPIDisconnectionError}
+        return {DefaultCredentialsError: SupersetDBAPIConnectionError}
 
     @classmethod
     def validate_parameters(
-        cls, parameters: BigQueryParametersType  # pylint: disable=unused-argument
-    ) -> List[SupersetError]:
+        cls,
+        properties: BasicPropertiesType,  # pylint: disable=unused-argument
+    ) -> list[SupersetError]:
         return []
 
     @classmethod
@@ -469,15 +672,14 @@ class BigQueryEngineSpec(BaseEngineSpec):
     @classmethod
     def select_star(  # pylint: disable=too-many-arguments
         cls,
-        database: "Database",
-        table_name: str,
+        database: Database,
+        table: Table,
         engine: Engine,
-        schema: Optional[str] = None,
         limit: int = 100,
         show_cols: bool = False,
         indent: bool = True,
         latest_partition: bool = True,
-        cols: Optional[List[Dict[str, Any]]] = None,
+        cols: list[ResultSetColumnType] | None = None,
     ) -> str:
         """
         Remove array structures from `SELECT *`.
@@ -518,20 +720,21 @@ class BigQueryEngineSpec(BaseEngineSpec):
             # For arrays of structs, remove the child columns, otherwise the query
             # will fail.
             array_prefixes = {
-                col["name"] for col in cols if isinstance(col["type"], sqltypes.ARRAY)
+                col["column_name"]
+                for col in cols
+                if isinstance(col["type"], sqltypes.ARRAY)
             }
             cols = [
                 col
                 for col in cols
-                if "." not in col["name"]
-                or col["name"].split(".")[0] not in array_prefixes
+                if "." not in col["column_name"]
+                or col["column_name"].split(".")[0] not in array_prefixes
             ]
 
         return super().select_star(
             database,
-            table_name,
+            table,
             engine,
-            schema,
             limit,
             show_cols,
             indent,
@@ -540,7 +743,7 @@ class BigQueryEngineSpec(BaseEngineSpec):
         )
 
     @classmethod
-    def _get_fields(cls, cols: List[Dict[str, Any]]) -> List[Any]:
+    def _get_fields(cls, cols: list[ResultSetColumnType]) -> list[Any]:
         """
         Label columns using their fully qualified name.
 
@@ -565,4 +768,16 @@ class BigQueryEngineSpec(BaseEngineSpec):
         the columns using their fully qualified name, so we end up with "author",
         "author__name" and "author__email", respectively.
         """
-        return [column(c["name"]).label(c["name"].replace(".", "__")) for c in cols]
+        return [
+            column(c["column_name"]).label(c["column_name"].replace(".", "__"))
+            for c in cols
+        ]
+
+    @classmethod
+    def parse_error_exception(cls, exception: Exception) -> Exception:
+        try:
+            return Exception(str(exception).splitlines()[0].strip())
+        except Exception:  # pylint: disable=broad-except
+            # If for some reason we get an exception, for example, no new line
+            # We will return the original exception
+            return exception

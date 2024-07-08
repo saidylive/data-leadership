@@ -18,7 +18,6 @@
  */
 import userEvent from '@testing-library/user-event';
 import fetchMock from 'fetch-mock';
-import React from 'react';
 import { render, screen } from 'spec/helpers/testing-library';
 import SelectAsyncControl from '.';
 
@@ -65,17 +64,17 @@ beforeEach(() => {
   jest.resetAllMocks();
 });
 
-test('Should render', () => {
+test('Should render', async () => {
   const props = createProps();
   render(<SelectAsyncControl {...props} />, { useRedux: true });
-  expect(screen.getByTestId('select-test')).toBeInTheDocument();
+  expect(await screen.findByTestId('select-test')).toBeInTheDocument();
 });
 
-test('Should send correct props to Select component - value props', () => {
+test('Should send correct props to Select component - value props', async () => {
   const props = createProps();
   render(<SelectAsyncControl {...props} />, { useRedux: true });
 
-  expect(screen.getByTestId('select-test')).toHaveAttribute(
+  expect(await screen.findByTestId('select-test')).toHaveAttribute(
     'data-value',
     JSON.stringify(props.value),
   );
@@ -89,20 +88,20 @@ test('Should send correct props to Select component - value props', () => {
   );
 });
 
-test('Should send correct props to Select component - function onChange multi:true', () => {
+test('Should send correct props to Select component - function onChange multi:true', async () => {
   const props = createProps();
   render(<SelectAsyncControl {...props} />, { useRedux: true });
   expect(props.onChange).toBeCalledTimes(0);
-  userEvent.click(screen.getByText('onChange'));
+  userEvent.click(await screen.findByText('onChange'));
   expect(props.onChange).toBeCalledTimes(1);
 });
 
-test('Should send correct props to Select component - function onChange multi:false', () => {
+test('Should send correct props to Select component - function onChange multi:false', async () => {
   const props = createProps();
   render(<SelectAsyncControl {...{ ...props, multi: false }} />, {
     useRedux: true,
   });
   expect(props.onChange).toBeCalledTimes(0);
-  userEvent.click(screen.getByText('onChange'));
+  userEvent.click(await screen.findByText('onChange'));
   expect(props.onChange).toBeCalledTimes(1);
 });

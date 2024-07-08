@@ -16,18 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { Component } from 'react';
 import PropTypes from 'prop-types';
 import { t } from '@superset-ui/core';
 import { Tooltip } from 'src/components/Tooltip';
 import Label from 'src/components/Label';
 
 const propTypes = {
-  dashboardId: PropTypes.number.isRequired,
+  dashboardId: PropTypes.number,
   isPublished: PropTypes.bool.isRequired,
   savePublished: PropTypes.func.isRequired,
-  canEdit: PropTypes.bool.isRequired,
-  canSave: PropTypes.bool.isRequired,
+  canEdit: PropTypes.bool,
+  canSave: PropTypes.bool,
 };
 
 const draftButtonTooltip = t(
@@ -44,7 +44,7 @@ const publishedTooltip = t(
   'This dashboard is published. Click to make it a draft.',
 );
 
-export default class PublishedStatus extends React.Component {
+export default class PublishedStatus extends Component {
   componentDidMount() {
     this.togglePublished = this.togglePublished.bind(this);
   }

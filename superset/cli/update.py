@@ -30,7 +30,7 @@ from flask_appbuilder.api import BaseApi
 from flask_appbuilder.api.manager import resolver
 
 import superset.utils.database as database_utils
-from superset.extensions import db
+from superset.utils.decorators import transaction
 from superset.utils.encrypt import SecretsMigrator
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 @click.command()
 @with_appcontext
+@transaction()
 @click.option("--database_name", "-d", help="Database name to change")
 @click.option("--uri", "-u", help="Database URI to change")
 @click.option(
@@ -54,6 +55,7 @@ def set_database_uri(database_name: str, uri: str, skip_create: bool) -> None:
 
 @click.command()
 @with_appcontext
+@transaction()
 def sync_tags() -> None:
     """Rebuilds special tags (owner, type, favorited by)."""
     # pylint: disable=no-member
@@ -62,9 +64,9 @@ def sync_tags() -> None:
     # pylint: disable=import-outside-toplevel
     from superset.common.tags import add_favorites, add_owners, add_types
 
-    add_types(db.engine, metadata)
-    add_owners(db.engine, metadata)
-    add_favorites(db.engine, metadata)
+    add_types(metadata)
+    add_owners(metadata)
+    add_favorites(metadata)
 
 
 @click.command()
@@ -82,7 +84,7 @@ def update_api_docs() -> None:
         title=current_app.appbuilder.app_name,
         version=api_version,
         openapi_version="3.0.2",
-        info=dict(description=current_app.appbuilder.app_name),
+        info={"description": current_app.appbuilder.app_name},
         plugins=[MarshmallowPlugin(schema_name_resolver=resolver)],
         servers=[{"url": "http://localhost:8088"}],
     )
@@ -121,7 +123,7 @@ def re_encrypt_secrets(previous_secret_key: Optional[str] = None) -> None:
     except ValueError as exc:
         click.secho(
             f"An error occurred, "
-            f"probably an invalid previoud secret key was provided. Error:[{exc}]",
+            f"probably an invalid previous secret key was provided. Error:[{exc}]",
             err=True,
         )
         sys.exit(1)

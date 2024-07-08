@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, {
+import {
   useRef,
   useEffect,
   useMemo,
@@ -24,7 +24,9 @@ import React, {
   useImperativeHandle,
   useLayoutEffect,
   useCallback,
+  Ref,
 } from 'react';
+
 import { styled } from '@superset-ui/core';
 import { ECharts, init } from 'echarts';
 import { EchartsHandler, EchartsProps, EchartsStylesProps } from '../types';
@@ -42,10 +44,15 @@ function Echart(
     eventHandlers,
     zrEventHandlers,
     selectedValues = {},
+    refs,
   }: EchartsProps,
-  ref: React.Ref<EchartsHandler>,
+  ref: Ref<EchartsHandler>,
 ) {
   const divRef = useRef<HTMLDivElement>(null);
+  if (refs) {
+    // eslint-disable-next-line no-param-reassign
+    refs.divRef = divRef;
+  }
   const chartRef = useRef<ECharts>();
   const currentSelection = useMemo(
     () => Object.keys(selectedValues) || [],
@@ -106,6 +113,7 @@ function Echart(
   // did mount
   useEffect(() => {
     handleSizeChange({ width, height });
+    return () => chartRef.current?.dispose();
   }, []);
 
   useLayoutEffect(() => {

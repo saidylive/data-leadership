@@ -16,29 +16,35 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { omit } from 'lodash';
 import { Input } from 'src/components/Input';
 import { FormItem } from 'src/components/Form';
 import jsonStringify from 'json-stringify-pretty-compact';
 import Button from 'src/components/Button';
-import { AsyncSelect, Row, Col, AntdForm } from 'src/components';
+import { AntdForm, AsyncSelect, Col, Row } from 'src/components';
 import rison from 'rison';
 import {
-  styled,
-  t,
-  SupersetClient,
-  getCategoricalSchemeRegistry,
   ensureIsArray,
-  getSharedLabelColor,
+  isFeatureEnabled,
+  FeatureFlag,
+  getCategoricalSchemeRegistry,
+  styled,
+  SupersetClient,
+  t,
+  getClientErrorObject,
 } from '@superset-ui/core';
 
 import Modal from 'src/components/Modal';
 import { JsonEditor } from 'src/components/AsyncAceEditor';
 
 import ColorSchemeControlWrapper from 'src/dashboard/components/ColorSchemeControlWrapper';
-import { getClientErrorObject } from 'src/utils/getClientErrorObject';
+import FilterScopeModal from 'src/dashboard/components/filterscope/FilterScopeModal';
 import withToasts from 'src/components/MessageToasts/withToasts';
-import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
+import TagType from 'src/types/TagType';
+import { fetchTags, OBJECT_TYPES } from 'src/features/tags/tags';
+import { loadTags } from 'src/components/Tags/utils';
+import { applyColors, getColorNamespace } from 'src/utils/colorScheme';
 
 const StyledFormItem = styled(FormItem)`
   margin-bottom: 0;
@@ -56,7 +62,6 @@ type PropertiesModalProps = {
   show?: boolean;
   onHide?: () => void;
   colorScheme?: string;
-  setColorSchemeAndUnsavedChanges?: () => void;
   onSubmit?: (params: Record<string, any>) => void;
   addSuccessToast: (message: string) => void;
   addDangerToast: (message: string) => void;
@@ -100,7 +105,16 @@ const PropertiesModal = ({
   const [owners, setOwners] = useState<Owners>([]);
   const [roles, setRoles] = useState<Roles>([]);
   const saveLabel = onlyApply ? t('Apply') : t('Save');
+  const [tags, setTags] = useState<TagType[]>([]);
   const categoricalSchemeRegistry = getCategoricalSchemeRegistry();
+
+  const tagsAsSelectValues = useMemo(() => {
+    const selectTags = tags.map((tag: { id: number; name: string }) => ({
+      value: tag.id,
+      label: tag.name,
+    }));
+    return selectTags;
+  }, [tags.length]);
 
   const handleErrorResponse = async (response: Response) => {
     const { error, statusText, message } = await getClientErrorObject(response);
@@ -116,7 +130,7 @@ const PropertiesModal = ({
     }
 
     Modal.error({
-      title: 'Error',
+      title: t('Error'),
       content: errorText,
       okButtonProps: { danger: true, className: 'btn-danger' },
     });
@@ -133,7 +147,9 @@ const PropertiesModal = ({
         endpoint: `/api/v1/dashboard/related/${accessType}?q=${query}`,
       }).then(response => ({
         data: response.json.result
-          .filter((item: { extra: { active: boolean } }) => item.extra.active)
+          .filter((item: { extra: { active: boolean } }) =>
+            item.extra.active !== undefined ? item.extra.active : true,
+          )
           .map((item: { value: number; text: string }) => ({
             value: item.value,
             label: item.text,
@@ -172,17 +188,11 @@ const PropertiesModal = ({
       setRoles(roles);
       setColorScheme(metadata.color_scheme);
 
-      // temporary fix to remove positions from dashboards' metadata
-      if (metadata?.positions) {
-        delete metadata.positions;
-      }
-      const metaDataCopy = { ...metadata };
-
-      if (metaDataCopy?.shared_label_colors) {
-        delete metaDataCopy.shared_label_colors;
-      }
-
-      delete metaDataCopy.color_scheme_domain;
+      const metaDataCopy = omit(metadata, [
+        'positions',
+        'shared_label_colors',
+        'color_scheme_domain',
+      ]);
 
       setJsonMetadata(metaDataCopy ? jsonStringify(metaDataCopy) : '');
     },
@@ -265,7 +275,7 @@ const PropertiesModal = ({
   };
 
   const onColorSchemeChange = (
-    colorScheme?: string,
+    colorScheme = '',
     { updateMetadata = true } = {},
   ) => {
     // check that color_scheme is valid
@@ -275,7 +285,7 @@ const PropertiesModal = ({
     // only fire if the color_scheme is present and invalid
     if (colorScheme && !colorChoices.includes(colorScheme)) {
       Modal.error({
-        title: 'Error',
+        title: t('Error'),
         content: t('A valid color scheme is required'),
         okButtonProps: { danger: true, className: 'btn-danger' },
       });
@@ -296,55 +306,55 @@ const PropertiesModal = ({
     const { title, slug, certifiedBy, certificationDetails } =
       form.getFieldsValue();
     let currentColorScheme = colorScheme;
-    let colorNamespace = '';
     let currentJsonMetadata = jsonMetadata;
 
-    // color scheme in json metadata has precedence over selection
-    if (currentJsonMetadata?.length) {
-      let metadata;
-      try {
-        metadata = JSON.parse(currentJsonMetadata);
-      } catch (error) {
-        addDangerToast(t('JSON metadata is invalid!'));
+    // validate currentJsonMetadata
+    let metadata;
+    try {
+      if (
+        !currentJsonMetadata.startsWith('{') ||
+        !currentJsonMetadata.endsWith('}')
+      ) {
+        throw new Error();
       }
-      currentColorScheme = metadata?.color_scheme || colorScheme;
-      colorNamespace = metadata?.color_namespace || '';
-
-      // filter shared_label_color from user input
-      if (metadata?.shared_label_colors) {
-        delete metadata.shared_label_colors;
-      }
-      if (metadata?.color_scheme_domain) {
-        delete metadata.color_scheme_domain;
-      }
-
-      const colorMap = getSharedLabelColor().getColorMap(
-        colorNamespace,
-        currentColorScheme,
-        true,
-      );
-
-      metadata.shared_label_colors = colorMap;
-
-      if (metadata?.color_scheme) {
-        metadata.color_scheme_domain =
-          categoricalSchemeRegistry.get(colorScheme)?.colors || [];
-      } else {
-        metadata.color_scheme_domain = [];
-      }
-
-      currentJsonMetadata = jsonStringify(metadata);
+      metadata = JSON.parse(currentJsonMetadata);
+    } catch (error) {
+      addDangerToast(t('JSON metadata is invalid!'));
+      return;
     }
+
+    const copyMetadata = { ...metadata };
+    const colorNamespace = getColorNamespace(metadata?.color_namespace);
+
+    // color scheme in json metadata has precedence over selection
+    currentColorScheme = metadata?.color_scheme || colorScheme;
+
+    // remove information from user facing input
+    if (metadata?.shared_label_colors) {
+      delete metadata.shared_label_colors;
+    }
+    if (metadata?.color_scheme_domain) {
+      delete metadata.color_scheme_domain;
+    }
+
+    // only apply colors, the user has not saved yet
+    applyColors(copyMetadata, true);
+
+    currentJsonMetadata = jsonStringify(metadata);
 
     onColorSchemeChange(currentColorScheme, {
       updateMetadata: false,
     });
 
     const moreOnSubmitProps: { roles?: Roles } = {};
-    const morePutProps: { roles?: number[] } = {};
-    if (isFeatureEnabled(FeatureFlag.DASHBOARD_RBAC)) {
+    const morePutProps: { roles?: number[]; tags?: (number | undefined)[] } =
+      {};
+    if (isFeatureEnabled(FeatureFlag.DashboardRbac)) {
       moreOnSubmitProps.roles = roles;
       morePutProps.roles = (roles || []).map(r => r.id);
+    }
+    if (isFeatureEnabled(FeatureFlag.TaggingSystem)) {
+      morePutProps.tags = tags.map(tag => tag.id);
     }
     const onSubmitProps = {
       id: dashboardId,
@@ -359,9 +369,9 @@ const PropertiesModal = ({
       ...moreOnSubmitProps,
     };
     if (onlyApply) {
-      addSuccessToast(t('Dashboard properties updated'));
       onSubmit(onSubmitProps);
       onHide();
+      addSuccessToast(t('Dashboard properties updated'));
     } else {
       SupersetClient.put({
         endpoint: `/api/v1/dashboard/${dashboardId}`,
@@ -377,16 +387,16 @@ const PropertiesModal = ({
           ...morePutProps,
         }),
       }).then(() => {
-        addSuccessToast(t('The dashboard has been saved'));
         onSubmit(onSubmitProps);
         onHide();
+        addSuccessToast(t('The dashboard has been saved'));
       }, handleErrorResponse);
     }
   };
 
   const getRowsWithoutRoles = () => {
     const jsonMetadataObj = getJsonMetadata();
-    const hasCustomLabelColors = !!Object.keys(
+    const hasCustomLabelsColor = !!Object.keys(
       jsonMetadataObj?.label_colors || {},
     ).length;
 
@@ -416,7 +426,7 @@ const PropertiesModal = ({
         <Col xs={24} md={12}>
           <h3 style={{ marginTop: '1em' }}>{t('Colors')}</h3>
           <ColorSchemeControlWrapper
-            hasCustomLabelColors={hasCustomLabelColors}
+            hasCustomLabelsColor={hasCustomLabelsColor}
             onChange={onColorSchemeChange}
             colorScheme={colorScheme}
             labelMargin={4}
@@ -428,7 +438,7 @@ const PropertiesModal = ({
 
   const getRowsWithRoles = () => {
     const jsonMetadataObj = getJsonMetadata();
-    const hasCustomLabelColors = !!Object.keys(
+    const hasCustomLabelsColor = !!Object.keys(
       jsonMetadataObj?.label_colors || {},
     ).length;
 
@@ -444,6 +454,7 @@ const PropertiesModal = ({
             <StyledFormItem label={t('Owners')}>
               <AsyncSelect
                 allowClear
+                allowNewOptions
                 ariaLabel={t('Owners')}
                 disabled={isLoading}
                 mode="multiple"
@@ -476,7 +487,7 @@ const PropertiesModal = ({
             </StyledFormItem>
             <p className="help-block">
               {t(
-                'Roles is a list which defines access to the dashboard. Granting a role access to a dashboard will bypass dataset level checks. If no roles are defined, then the dashboard is available to all roles.',
+                'Roles is a list which defines access to the dashboard. Granting a role access to a dashboard will bypass dataset level checks. If no roles are defined, regular access permissions apply.',
               )}
             </p>
           </Col>
@@ -484,7 +495,7 @@ const PropertiesModal = ({
         <Row>
           <Col xs={24} md={12}>
             <ColorSchemeControlWrapper
-              hasCustomLabelColors={hasCustomLabelColors}
+              hasCustomLabelsColor={hasCustomLabelsColor}
               onChange={onColorSchemeChange}
               colorScheme={colorScheme}
               labelMargin={4}
@@ -520,6 +531,33 @@ const PropertiesModal = ({
       });
     }
   }, [dashboardInfo, dashboardTitle, form]);
+
+  useEffect(() => {
+    if (!isFeatureEnabled(FeatureFlag.TaggingSystem)) return;
+    try {
+      fetchTags(
+        {
+          objectType: OBJECT_TYPES.DASHBOARD,
+          objectId: dashboardId,
+          includeTypes: false,
+        },
+        (tags: TagType[]) => setTags(tags),
+        (error: Response) => {
+          addDangerToast(`Error fetching tags: ${error.text}`);
+        },
+      );
+    } catch (error) {
+      handleErrorResponse(error);
+    }
+  }, [dashboardId]);
+
+  const handleChangeTags = (tags: { label: string; value: number }[]) => {
+    const parsedTags: TagType[] = ensureIsArray(tags).map(r => ({
+      id: r.value,
+      name: r.label,
+    }));
+    setTags(parsedTags);
+  };
 
   return (
     <Modal
@@ -573,7 +611,7 @@ const PropertiesModal = ({
         </Row>
         <Row gutter={16}>
           <Col xs={24} md={12}>
-            <FormItem label={t('Title')} name="title">
+            <FormItem label={t('Name')} name="title">
               <Input
                 data-test="dashboard-title-input"
                 type="text"
@@ -590,7 +628,7 @@ const PropertiesModal = ({
             </p>
           </Col>
         </Row>
-        {isFeatureEnabled(FeatureFlag.DASHBOARD_RBAC)
+        {isFeatureEnabled(FeatureFlag.DashboardRbac)
           ? getRowsWithRoles()
           : getRowsWithoutRoles()}
         <Row>
@@ -619,6 +657,32 @@ const PropertiesModal = ({
             </p>
           </Col>
         </Row>
+        {isFeatureEnabled(FeatureFlag.TaggingSystem) ? (
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <h3 css={{ marginTop: '1em' }}>{t('Tags')}</h3>
+            </Col>
+          </Row>
+        ) : null}
+        {isFeatureEnabled(FeatureFlag.TaggingSystem) ? (
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <StyledFormItem>
+                <AsyncSelect
+                  ariaLabel="Tags"
+                  mode="multiple"
+                  value={tagsAsSelectValues}
+                  options={loadTags}
+                  onChange={handleChangeTags}
+                  allowClear
+                />
+              </StyledFormItem>
+              <p className="help-block">
+                {t('A list of tags that have been applied to this chart.')}
+              </p>
+            </Col>
+          </Row>
+        ) : null}
         <Row>
           <Col xs={24} md={24}>
             <h3 style={{ marginTop: '1em' }}>
@@ -650,6 +714,23 @@ const PropertiesModal = ({
                 <p className="help-block">
                   {t(
                     'This JSON object is generated dynamically when clicking the save or overwrite button in the dashboard view. It is exposed here for reference and for power users who may want to alter specific parameters.',
+                  )}
+                  {onlyApply && (
+                    <>
+                      {' '}
+                      {t(
+                        'Please DO NOT overwrite the "filter_scopes" key.',
+                      )}{' '}
+                      <FilterScopeModal
+                        triggerNode={
+                          <span className="alert-link">
+                            {t('Use "%(menuName)s" menu instead.', {
+                              menuName: t('Set filter mapping'),
+                            })}
+                          </span>
+                        }
+                      />
+                    </>
                   )}
                 </p>
               </>

@@ -16,12 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import * as reactRedux from 'react-redux';
-import { render, screen, cleanup, waitFor } from 'spec/helpers/testing-library';
+import {
+  fireEvent,
+  render,
+  screen,
+  cleanup,
+  waitFor,
+} from 'spec/helpers/testing-library';
 import userEvent from '@testing-library/user-event';
 import fetchMock from 'fetch-mock';
 import { SaveDatasetModal } from 'src/SqlLab/components/SaveDatasetModal';
+import { createDatasource } from 'src/SqlLab/actions/sqlLab';
 import { user, testQuery, mockdatasets } from 'src/SqlLab/fixtures';
 
 const mockedProps = {
@@ -32,7 +38,7 @@ const mockedProps = {
   datasource: testQuery,
 };
 
-fetchMock.get('glob:*/api/v1/dataset?*', {
+fetchMock.get('glob:*/api/v1/dataset/?*', {
   result: mockdatasets,
   dataset_count: 3,
 });
@@ -45,6 +51,15 @@ beforeEach(() => {
   useSelectorMock.mockClear();
   cleanup();
 });
+
+// Mock the createDatasource action
+const useDispatchMock = jest.spyOn(reactRedux, 'useDispatch');
+jest.mock('src/SqlLab/actions/sqlLab', () => ({
+  createDatasource: jest.fn(),
+}));
+jest.mock('src/explore/exploreUtils/formData', () => ({
+  postFormData: jest.fn(),
+}));
 
 describe('SaveDatasetModal', () => {
   it('renders a "Save as new" field', () => {
@@ -174,5 +189,61 @@ describe('SaveDatasetModal', () => {
     expect(screen.getByRole('button', { name: /close/i })).toBeVisible();
     expect(screen.getByRole('button', { name: /back/i })).toBeVisible();
     expect(screen.getByRole('button', { name: /overwrite/i })).toBeVisible();
+  });
+
+  it('sends the schema when creating the dataset', async () => {
+    const dummyDispatch = jest.fn().mockResolvedValue({});
+    useDispatchMock.mockReturnValue(dummyDispatch);
+    useSelectorMock.mockReturnValue({ ...user });
+
+    render(<SaveDatasetModal {...mockedProps} />, { useRedux: true });
+
+    const inputFieldText = screen.getByDisplayValue(/unimportant/i);
+    fireEvent.change(inputFieldText, { target: { value: 'my dataset' } });
+
+    const saveConfirmationBtn = screen.getByRole('button', {
+      name: /save/i,
+    });
+    userEvent.click(saveConfirmationBtn);
+
+    expect(createDatasource).toHaveBeenCalledWith({
+      datasourceName: 'my dataset',
+      dbId: 1,
+      catalog: null,
+      schema: 'main',
+      sql: 'SELECT *',
+      templateParams: undefined,
+    });
+  });
+
+  it('sends the catalog when creating the dataset', async () => {
+    const dummyDispatch = jest.fn().mockResolvedValue({});
+    useDispatchMock.mockReturnValue(dummyDispatch);
+    useSelectorMock.mockReturnValue({ ...user });
+
+    render(
+      <SaveDatasetModal
+        {...mockedProps}
+        datasource={{ ...mockedProps.datasource, catalog: 'public' }}
+      />,
+      { useRedux: true },
+    );
+
+    const inputFieldText = screen.getByDisplayValue(/unimportant/i);
+    fireEvent.change(inputFieldText, { target: { value: 'my dataset' } });
+
+    const saveConfirmationBtn = screen.getByRole('button', {
+      name: /save/i,
+    });
+    userEvent.click(saveConfirmationBtn);
+
+    expect(createDatasource).toHaveBeenCalledWith({
+      datasourceName: 'my dataset',
+      dbId: 1,
+      catalog: 'public',
+      schema: 'main',
+      sql: 'SELECT *',
+      templateParams: undefined,
+    });
   });
 });

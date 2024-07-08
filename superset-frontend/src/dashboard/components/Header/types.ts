@@ -54,7 +54,13 @@ export interface HeaderDropdownProps {
   updateCss: () => void;
   userCanEdit: boolean;
   userCanSave: boolean;
+  userCanShare: boolean;
+  userCanCurate: boolean;
+  isDropdownVisible: boolean;
+  manageEmbedded: () => void;
+  dataMask: any;
   lastModifiedTime: number;
+  logEvent: () => void;
 }
 
 export interface HeaderProps {
@@ -68,7 +74,8 @@ export interface HeaderProps {
   user: Object | undefined;
   dashboardInfo: DashboardInfo;
   dashboardTitle: string;
-  setColorSchemeAndUnsavedChanges: () => void;
+  setColorScheme: () => void;
+  setUnsavedChanges: () => void;
   isStarred: boolean;
   isPublished: boolean;
   onChange: () => void;

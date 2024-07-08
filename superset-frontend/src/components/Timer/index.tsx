@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { styled } from '@superset-ui/core';
 import Label, { Type } from 'src/components/Label';
 
@@ -31,6 +31,7 @@ export interface TimerProps {
 
 const TimerLabel = styled(Label)`
   text-align: left;
+  font-family: ${({ theme }) => theme.typography.families.monospace};
 `;
 
 export default function Timer({

@@ -19,7 +19,6 @@
 import { Preset } from '@superset-ui/core';
 import userEvent, { specialChars } from '@testing-library/user-event';
 import fetchMock from 'fetch-mock';
-import React from 'react';
 import chartQueries from 'spec/fixtures/mockChartQueries';
 import { dashboardLayout } from 'spec/fixtures/mockDashboardLayout';
 import mockDatasource, { datasourceId, id } from 'spec/fixtures/mockDatasource';
@@ -32,8 +31,7 @@ import {
   TimeFilterPlugin,
   TimeGrainFilterPlugin,
 } from 'src/filters/components';
-import {
-  FiltersConfigModal,
+import FiltersConfigModal, {
   FiltersConfigModalProps,
 } from './FiltersConfigModal';
 
@@ -354,10 +352,91 @@ test('filters are draggable', async () => {
     adds a new time grain filter type with all fields filled
     collapsible controls opens by default when it is checked
     advanced section opens by default when it has an option checked
-    deletes a filter
     disables the default value when default to first item is checked
     changes the default value options when the column changes
     switches to configuration tab when validation fails
     displays cancel message when there are pending operations
     do not displays cancel message when there are no pending operations
 */
+
+test('deletes a filter', async () => {
+  const nativeFilterState = [
+    buildNativeFilter('NATIVE_FILTER-1', 'state', ['NATIVE_FILTER-2']),
+    buildNativeFilter('NATIVE_FILTER-2', 'country', []),
+    buildNativeFilter('NATIVE_FILTER-3', 'product', []),
+  ];
+  const state = {
+    ...defaultState(),
+    dashboardInfo: {
+      metadata: { native_filter_configuration: nativeFilterState },
+    },
+    dashboardLayout,
+  };
+  const onSave = jest.fn();
+  defaultRender(state, {
+    ...props,
+    createNewOnOpen: false,
+    onSave,
+  });
+  const removeButtons = screen.getAllByRole('img', { name: 'trash' });
+  // remove NATIVE_FILTER-3 which isn't a dependancy of any other filter
+  userEvent.click(removeButtons[2]);
+  userEvent.click(screen.getByRole('button', { name: SAVE_REGEX }));
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'NATIVE_FILTER',
+          id: 'NATIVE_FILTER-1',
+          cascadeParentIds: ['NATIVE_FILTER-2'],
+        }),
+        expect.objectContaining({
+          type: 'NATIVE_FILTER',
+          id: 'NATIVE_FILTER-2',
+          cascadeParentIds: [],
+        }),
+      ]),
+    ),
+  );
+});
+
+test('deletes a filter including dependencies', async () => {
+  const nativeFilterState = [
+    buildNativeFilter('NATIVE_FILTER-1', 'state', ['NATIVE_FILTER-2']),
+    buildNativeFilter('NATIVE_FILTER-2', 'country', []),
+    buildNativeFilter('NATIVE_FILTER-3', 'product', []),
+  ];
+  const state = {
+    ...defaultState(),
+    dashboardInfo: {
+      metadata: { native_filter_configuration: nativeFilterState },
+    },
+    dashboardLayout,
+  };
+  const onSave = jest.fn();
+  defaultRender(state, {
+    ...props,
+    createNewOnOpen: false,
+    onSave,
+  });
+  const removeButtons = screen.getAllByRole('img', { name: 'trash' });
+  // remove NATIVE_FILTER-2 which is a dependancy of NATIVE_FILTER-1
+  userEvent.click(removeButtons[1]);
+  userEvent.click(screen.getByRole('button', { name: SAVE_REGEX }));
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'NATIVE_FILTER',
+          id: 'NATIVE_FILTER-1',
+          cascadeParentIds: [],
+        }),
+        expect.objectContaining({
+          type: 'NATIVE_FILTER',
+          id: 'NATIVE_FILTER-3',
+          cascadeParentIds: [],
+        }),
+      ]),
+    ),
+  );
+});

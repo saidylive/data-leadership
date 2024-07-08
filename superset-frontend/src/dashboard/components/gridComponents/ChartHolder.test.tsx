@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import React from 'react';
 import { combineReducers, createStore, applyMiddleware, compose } from 'redux';
 import { Provider } from 'react-redux';
 import thunk from 'redux-thunk';
@@ -137,7 +136,7 @@ describe('ChartHolder', () => {
 
     rerender(
       <Provider store={store}>
-        <ChartHolder {...defaultProps} editMode />
+        <ChartHolder {...defaultProps} editMode isInView />
       </Provider>,
     );
 
@@ -414,6 +413,7 @@ describe('ChartHolder', () => {
           deleteComponent={deleteComponent}
           fullSizeChartId={null}
           editMode
+          isInView
         />
       </Provider>,
     );

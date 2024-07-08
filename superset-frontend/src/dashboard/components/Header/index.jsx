@@ -18,17 +18,17 @@
  */
 /* eslint-env browser */
 import moment from 'moment';
-import React from 'react';
+import { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import {
   styled,
   css,
+  isFeatureEnabled,
+  FeatureFlag,
   t,
-  getSharedLabelColor,
-  getUiOverrideRegistry,
+  getExtensionsRegistry,
 } from '@superset-ui/core';
 import { Global } from '@emotion/react';
-import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
 import {
   LOG_ACTIONS_PERIODIC_RENDER_DASHBOARD,
   LOG_ACTIONS_FORCE_REFRESH_DASHBOARD,
@@ -40,12 +40,12 @@ import { AntdButton } from 'src/components/';
 import { findPermission } from 'src/utils/findPermission';
 import { Tooltip } from 'src/components/Tooltip';
 import { safeStringify } from 'src/utils/safeStringify';
-import HeaderActionsDropdown from 'src/dashboard/components/Header/HeaderActionsDropdown';
+import ConnectedHeaderActionsDropdown from 'src/dashboard/components/Header/HeaderActionsDropdown';
 import PublishedStatus from 'src/dashboard/components/PublishedStatus';
 import UndoRedoKeyListeners from 'src/dashboard/components/UndoRedoKeyListeners';
 import PropertiesModal from 'src/dashboard/components/PropertiesModal';
 import { chartPropShape } from 'src/dashboard/util/propShapes';
-import { UserWithPermissionsAndRoles } from 'src/types/bootstrapTypes';
+import getOwnerName from 'src/utils/getOwnerName';
 import {
   UNDO_LIMIT,
   SAVE_TYPE_OVERWRITE,
@@ -54,28 +54,29 @@ import {
 import setPeriodicRunner, {
   stopPeriodicRender,
 } from 'src/dashboard/util/setPeriodicRunner';
-import { options as PeriodicRefreshOptions } from 'src/dashboard/components/RefreshIntervalModal';
-import { FILTER_BOX_MIGRATION_STATES } from 'src/explore/constants';
 import { PageHeaderWithActions } from 'src/components/PageHeaderWithActions';
-import { DashboardEmbedModal } from '../DashboardEmbedControls';
+import MetadataBar, { MetadataType } from 'src/components/MetadataBar';
+import DashboardEmbedModal from '../EmbeddedModal';
+import OverwriteConfirm from '../OverwriteConfirm';
 
-const uiOverrideRegistry = getUiOverrideRegistry();
+const extensionsRegistry = getExtensionsRegistry();
 
 const propTypes = {
   addSuccessToast: PropTypes.func.isRequired,
   addDangerToast: PropTypes.func.isRequired,
   addWarningToast: PropTypes.func.isRequired,
-  user: UserWithPermissionsAndRoles,
+  user: PropTypes.object, // UserWithPermissionsAndRoles,
   dashboardInfo: PropTypes.object.isRequired,
-  dashboardTitle: PropTypes.string.isRequired,
+  dashboardTitle: PropTypes.string,
   dataMask: PropTypes.object.isRequired,
   charts: PropTypes.objectOf(chartPropShape).isRequired,
   layout: PropTypes.object.isRequired,
-  expandedSlices: PropTypes.object.isRequired,
-  customCss: PropTypes.string.isRequired,
+  expandedSlices: PropTypes.object,
+  customCss: PropTypes.string,
   colorNamespace: PropTypes.string,
   colorScheme: PropTypes.string,
-  setColorSchemeAndUnsavedChanges: PropTypes.func.isRequired,
+  setColorScheme: PropTypes.func.isRequired,
+  setUnsavedChanges: PropTypes.func.isRequired,
   isStarred: PropTypes.bool.isRequired,
   isPublished: PropTypes.bool.isRequired,
   isLoading: PropTypes.bool.isRequired,
@@ -103,7 +104,7 @@ const propTypes = {
   redoLength: PropTypes.number.isRequired,
   setMaxUndoHistoryExceeded: PropTypes.func.isRequired,
   maxUndoHistoryToast: PropTypes.func.isRequired,
-  refreshFrequency: PropTypes.number.isRequired,
+  refreshFrequency: PropTypes.number,
   shouldPersistRefreshFrequency: PropTypes.bool.isRequired,
   setRefreshFrequency: PropTypes.func.isRequired,
   dashboardInfoChanged: PropTypes.func.isRequired,
@@ -169,7 +170,7 @@ const discardBtnStyle = theme => css`
   height: ${theme.gridUnit * 8}px;
 `;
 
-class Header extends React.PureComponent {
+class Header extends PureComponent {
   static discardChanges() {
     const url = new URL(window.location.href);
 
@@ -288,12 +289,17 @@ class Header extends React.PureComponent {
 
   startPeriodicRender(interval) {
     let intervalMessage;
+
     if (interval) {
-      const predefinedValue = PeriodicRefreshOptions.find(
-        option => option.value === interval / 1000,
+      const { dashboardInfo } = this.props;
+      const periodicRefreshOptions =
+        dashboardInfo.common?.conf?.DASHBOARD_AUTO_REFRESH_INTERVALS;
+      const predefinedValue = periodicRefreshOptions.find(
+        option => Number(option[0]) === interval / 1000,
       );
+
       if (predefinedValue) {
-        intervalMessage = predefinedValue.label;
+        intervalMessage = t(predefinedValue[1]);
       } else {
         intervalMessage = moment.duration(interval, 'millisecond').humanize();
       }
@@ -367,14 +373,10 @@ class Header extends React.PureComponent {
       ? currentRefreshFrequency
       : dashboardInfo.metadata?.refresh_frequency;
 
-    const currentColorScheme =
-      dashboardInfo?.metadata?.color_scheme || colorScheme;
     const currentColorNamespace =
       dashboardInfo?.metadata?.color_namespace || colorNamespace;
-    const currentSharedLabelColors = getSharedLabelColor().getColorMap(
-      currentColorNamespace,
-      currentColorScheme,
-    );
+    const currentColorScheme =
+      dashboardInfo?.metadata?.color_scheme || colorScheme;
 
     const data = {
       certified_by: dashboardInfo.certified_by,
@@ -391,7 +393,6 @@ class Header extends React.PureComponent {
         color_scheme: currentColorScheme,
         positions,
         refresh_frequency: refreshFrequency,
-        shared_label_colors: currentSharedLabelColors,
       },
     };
 
@@ -431,6 +432,27 @@ class Header extends React.PureComponent {
     this.setState({ showingEmbedModal: false });
   };
 
+  getMetadataItems = () => {
+    const { dashboardInfo } = this.props;
+    return [
+      {
+        type: MetadataType.LastModified,
+        value: dashboardInfo.changed_on_delta_humanized,
+        modifiedBy:
+          getOwnerName(dashboardInfo.changed_by) || t('Not available'),
+      },
+      {
+        type: MetadataType.Owner,
+        createdBy: getOwnerName(dashboardInfo.created_by) || t('Not available'),
+        owners:
+          dashboardInfo.owners.length > 0
+            ? dashboardInfo.owners.map(getOwnerName)
+            : t('None'),
+        createdOn: dashboardInfo.created_on_delta_humanized,
+      },
+    ];
+  };
+
   render() {
     const {
       dashboardTitle,
@@ -439,7 +461,8 @@ class Header extends React.PureComponent {
       customCss,
       colorNamespace,
       dataMask,
-      setColorSchemeAndUnsavedChanges,
+      setColorScheme,
+      setUnsavedChanges,
       colorScheme,
       onUndo,
       onRedo,
@@ -458,19 +481,15 @@ class Header extends React.PureComponent {
       shouldPersistRefreshFrequency,
       setRefreshFrequency,
       lastModifiedTime,
-      filterboxMigrationState,
+      logEvent,
     } = this.props;
 
     const userCanEdit =
-      dashboardInfo.dash_edit_perm &&
-      filterboxMigrationState !== FILTER_BOX_MIGRATION_STATES.REVIEWING &&
-      !dashboardInfo.is_managed_externally;
+      dashboardInfo.dash_edit_perm && !dashboardInfo.is_managed_externally;
     const userCanShare = dashboardInfo.dash_share_perm;
-    const userCanSaveAs =
-      dashboardInfo.dash_save_perm &&
-      filterboxMigrationState !== FILTER_BOX_MIGRATION_STATES.REVIEWING;
+    const userCanSaveAs = dashboardInfo.dash_save_perm;
     const userCanCurate =
-      isFeatureEnabled(FeatureFlag.EMBEDDED_SUPERSET) &&
+      isFeatureEnabled(FeatureFlag.EmbeddedSuperset) &&
       findPermission('can_set_embedded', 'Dashboard', user.roles);
     const refreshLimit =
       dashboardInfo.common?.conf?.SUPERSET_DASHBOARD_PERIODICAL_REFRESH_LIMIT;
@@ -480,6 +499,8 @@ class Header extends React.PureComponent {
 
     const handleOnPropertiesChange = updates => {
       const { dashboardInfoChanged, dashboardTitleChanged } = this.props;
+
+      setColorScheme(updates.colorScheme);
       dashboardInfoChanged({
         slug: updates.slug,
         metadata: JSON.parse(updates.jsonMetadata || '{}'),
@@ -488,11 +509,11 @@ class Header extends React.PureComponent {
         owners: updates.owners,
         roles: updates.roles,
       });
-      setColorSchemeAndUnsavedChanges(updates.colorScheme);
+      setUnsavedChanges(true);
       dashboardTitleChanged(updates.title);
     };
 
-    const NavExtension = uiOverrideRegistry.get('dashboard.nav.right');
+    const NavExtension = extensionsRegistry.get('dashboard.nav.right');
 
     return (
       <div
@@ -521,15 +542,24 @@ class Header extends React.PureComponent {
             isStarred: this.props.isStarred,
             showTooltip: true,
           }}
-          titlePanelAdditionalItems={
-            <PublishedStatus
-              dashboardId={dashboardInfo.id}
-              isPublished={isPublished}
-              savePublished={this.props.savePublished}
-              canEdit={userCanEdit}
-              canSave={userCanSaveAs}
-            />
-          }
+          titlePanelAdditionalItems={[
+            !editMode && (
+              <PublishedStatus
+                dashboardId={dashboardInfo.id}
+                isPublished={isPublished}
+                savePublished={this.props.savePublished}
+                canEdit={userCanEdit}
+                canSave={userCanSaveAs}
+                visible={!editMode}
+              />
+            ),
+            !editMode && (
+              <MetadataBar
+                items={this.getMetadataItems()}
+                tooltipPlacement="bottom"
+              />
+            ),
+          ]}
           rightPanelAdditionalItems={
             <div className="button-container">
               {userCanSaveAs && (
@@ -547,6 +577,7 @@ class Header extends React.PureComponent {
                           <StyledUndoRedoButton
                             type="text"
                             disabled={undoLength < 1}
+                            onClick={undoLength && onUndo}
                           >
                             <Icons.Undo
                               css={[
@@ -554,7 +585,6 @@ class Header extends React.PureComponent {
                                 this.state.emphasizeUndo && undoRedoEmphasized,
                                 undoLength < 1 && undoRedoDisabled,
                               ]}
-                              onClick={undoLength && onUndo}
                               data-test="undo-action"
                               iconSize="xl"
                             />
@@ -567,6 +597,7 @@ class Header extends React.PureComponent {
                           <StyledUndoRedoButton
                             type="text"
                             disabled={redoLength < 1}
+                            onClick={redoLength && onRedo}
                           >
                             <Icons.Redo
                               css={[
@@ -574,7 +605,6 @@ class Header extends React.PureComponent {
                                 this.state.emphasizeRedo && undoRedoEmphasized,
                                 redoLength < 1 && undoRedoDisabled,
                               ]}
-                              onClick={redoLength && onRedo}
                               data-test="redo-action"
                               iconSize="xl"
                             />
@@ -637,7 +667,7 @@ class Header extends React.PureComponent {
             onVisibleChange: this.setIsDropdownVisible,
           }}
           additionalActionsMenu={
-            <HeaderActionsDropdown
+            <ConnectedHeaderActionsDropdown
               addSuccessToast={this.props.addSuccessToast}
               addDangerToast={this.props.addDangerToast}
               dashboardId={dashboardInfo.id}
@@ -669,13 +699,13 @@ class Header extends React.PureComponent {
               refreshLimit={refreshLimit}
               refreshWarning={refreshWarning}
               lastModifiedTime={lastModifiedTime}
-              filterboxMigrationState={filterboxMigrationState}
               isDropdownVisible={this.state.isDropdownVisible}
               setIsDropdownVisible={this.setIsDropdownVisible}
+              logEvent={logEvent}
             />
           }
           showFaveStar={user?.userId && dashboardInfo?.id}
-          showTitlePanelItems={!editMode}
+          showTitlePanelItems
         />
         {this.state.showingPropertiesModal && (
           <PropertiesModal
@@ -689,6 +719,8 @@ class Header extends React.PureComponent {
             onlyApply
           />
         )}
+
+        <OverwriteConfirm />
 
         {userCanCurate && (
           <DashboardEmbedModal

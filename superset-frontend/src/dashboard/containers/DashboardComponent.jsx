@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import { bindActionCreators } from 'redux';
 import { connect } from 'react-redux';
@@ -35,9 +35,8 @@ import {
 } from 'src/dashboard/actions/dashboardLayout';
 import {
   setDirectPathToChild,
-  setActiveTabs,
+  setActiveTab,
   setFullSizeChartId,
-  postAddSliceFromDashboard,
 } from 'src/dashboard/actions/dashboardState';
 
 const propTypes = {
@@ -79,6 +78,7 @@ function mapStateToProps(
     editMode: dashboardState.editMode,
     filters: getActiveFilters(),
     dashboardId: dashboardInfo.id,
+    dashboardInfo,
     fullSizeChartId: dashboardState.fullSizeChartId,
   };
 
@@ -110,15 +110,14 @@ function mapDispatchToProps(dispatch) {
       handleComponentDrop,
       setDirectPathToChild,
       setFullSizeChartId,
-      setActiveTabs,
+      setActiveTab,
       logEvent,
-      postAddSliceFromDashboard,
     },
     dispatch,
   );
 }
 
-class DashboardComponent extends React.PureComponent {
+class DashboardComponent extends PureComponent {
   render() {
     const { component } = this.props;
     const Component = component ? componentLookup[component.type] : null;

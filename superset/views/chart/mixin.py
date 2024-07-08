@@ -14,15 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from flask import Markup
 from flask_babel import lazy_gettext as _
+from markupsafe import Markup
 
 from superset.dashboards.filters import DashboardAccessFilter
 from superset.views.chart.filters import SliceFilter
 
 
 class SliceMixin:  # pylint: disable=too-few-public-methods
-
     list_title = _("Charts")
     show_title = _("Show Chart")
     add_title = _("Add Chart")

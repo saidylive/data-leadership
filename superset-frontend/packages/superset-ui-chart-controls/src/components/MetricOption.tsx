@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState, ReactNode, useLayoutEffect } from 'react';
+import { useState, ReactNode, useLayoutEffect, RefObject } from 'react';
+
 import {
   css,
   styled,
@@ -46,7 +47,7 @@ export interface MetricOptionProps {
   showFormula?: boolean;
   showType?: boolean;
   url?: string;
-  labelRef?: React.RefObject<any>;
+  labelRef?: RefObject<any>;
   shouldShowTooltip?: boolean;
 }
 
@@ -71,11 +72,9 @@ export function MetricOption({
   const label = (
     <span
       className="option-label metric-option-label"
-      css={(theme: SupersetTheme) =>
-        css`
-          margin-right: ${theme.gridUnit}px;
-        `
-      }
+      css={(theme: SupersetTheme) => css`
+        margin-right: ${theme.gridUnit}px;
+      `}
       ref={labelRef}
     >
       {link}

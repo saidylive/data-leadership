@@ -26,28 +26,31 @@ Create Date: 2022-04-01 14:38:09.499483
 revision = "a9422eeaae74"
 down_revision = "ad07e4fdbaba"
 
-import json
-import os
-from datetime import datetime
-from typing import List, Optional, Set, Type, Union
-from uuid import uuid4
+import os  # noqa: E402
+from datetime import datetime  # noqa: E402
+from typing import Optional, Union  # noqa: E402
+from uuid import uuid4  # noqa: E402
 
-import sqlalchemy as sa
-from alembic import op
-from sqlalchemy import select
-from sqlalchemy.ext.declarative import declarative_base, declared_attr
-from sqlalchemy.orm import backref, relationship, Session
-from sqlalchemy.schema import UniqueConstraint
-from sqlalchemy.sql import functions as func
-from sqlalchemy.sql.expression import and_, or_
-from sqlalchemy_utils import UUIDType
+import sqlalchemy as sa  # noqa: E402
+from alembic import op  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+from sqlalchemy.ext.declarative import declarative_base, declared_attr  # noqa: E402
+from sqlalchemy.orm import backref, relationship, Session  # noqa: E402
+from sqlalchemy.schema import UniqueConstraint  # noqa: E402
+from sqlalchemy.sql import functions as func  # noqa: E402
+from sqlalchemy.sql.expression import and_, or_  # noqa: E402
+from sqlalchemy_utils import UUIDType  # noqa: E402
 
-from superset.connectors.sqla.models import ADDITIVE_METRIC_TYPES_LOWER
-from superset.connectors.sqla.utils import get_dialect_name, get_identifier_quoter
-from superset.extensions import encrypted_field_factory
-from superset.migrations.shared.utils import assign_uuids
-from superset.sql_parse import extract_table_references, Table
-from superset.utils.core import MediumText
+from superset.connectors.sqla.models import ADDITIVE_METRIC_TYPES_LOWER  # noqa: E402
+from superset.connectors.sqla.utils import (  # noqa: E402
+    get_dialect_name,
+    get_identifier_quoter,
+)
+from superset.extensions import encrypted_field_factory  # noqa: E402
+from superset.migrations.shared.utils import assign_uuids  # noqa: E402
+from superset.sql_parse import extract_table_references, Table  # noqa: E402
+from superset.utils import json  # noqa: E402
+from superset.utils.core import MediumText  # noqa: E402
 
 Base = declarative_base()
 SHOW_PROGRESS = os.environ.get("SHOW_PROGRESS") == "1"
@@ -86,7 +89,7 @@ class AuxiliaryColumnsMixin(UUIDMixin):
 
 
 def insert_from_select(
-    target: Union[str, sa.Table, Type[Base]], source: sa.sql.expression.Select
+    target: Union[str, sa.Table, type[Base]], source: sa.sql.expression.Select
 ) -> None:
     """
     Execute INSERT FROM SELECT to copy data from a SELECT query to the target table.
@@ -103,7 +106,6 @@ def insert_from_select(
 
 
 class Database(Base):
-
     __tablename__ = "dbs"
     __table_args__ = (UniqueConstraint("database_name"),)
 
@@ -118,7 +120,6 @@ class Database(Base):
 
 
 class TableColumn(AuxiliaryColumnsMixin, Base):
-
     __tablename__ = "table_columns"
     __table_args__ = (UniqueConstraint("table_id", "column_name"),)
 
@@ -138,7 +139,6 @@ class TableColumn(AuxiliaryColumnsMixin, Base):
 
 
 class SqlMetric(AuxiliaryColumnsMixin, Base):
-
     __tablename__ = "sql_metrics"
     __table_args__ = (UniqueConstraint("table_id", "metric_name"),)
 
@@ -164,7 +164,6 @@ sqlatable_user_table = sa.Table(
 
 
 class SqlaTable(AuxiliaryColumnsMixin, Base):
-
     __tablename__ = "tables"
     __table_args__ = (UniqueConstraint("database_id", "schema", "table_name"),)
 
@@ -213,7 +212,6 @@ dataset_user_association_table = sa.Table(
 
 
 class NewColumn(AuxiliaryColumnsMixin, Base):
-
     __tablename__ = "sl_columns"
 
     id = sa.Column(sa.Integer, primary_key=True)
@@ -243,7 +241,6 @@ class NewColumn(AuxiliaryColumnsMixin, Base):
 
 
 class NewTable(AuxiliaryColumnsMixin, Base):
-
     __tablename__ = "sl_tables"
 
     id = sa.Column(sa.Integer, primary_key=True)
@@ -263,8 +260,7 @@ class NewTable(AuxiliaryColumnsMixin, Base):
     )
 
 
-class NewDataset(Base, AuxiliaryColumnsMixin):
-
+class NewDataset(AuxiliaryColumnsMixin, Base):
     __tablename__ = "sl_datasets"
 
     id = sa.Column(sa.Integer, primary_key=True)
@@ -281,8 +277,8 @@ def find_tables(
     session: Session,
     database_id: int,
     default_schema: Optional[str],
-    tables: Set[Table],
-) -> List[int]:
+    tables: set[Table],
+) -> list[int]:
     """
     Look for NewTable's of from a specific database
     """
@@ -343,9 +339,8 @@ def copy_tables(session: Session) -> None:
             ]
         )
         # use an inner join to filter out only tables with valid database ids
-        .select_from(
-            sa.join(SqlaTable, Database, SqlaTable.database_id == Database.id)
-        ).where(is_physical_table),
+        .select_from(sa.join(SqlaTable, Database, SqlaTable.database_id == Database.id))
+        .where(is_physical_table),
     )
 
 
@@ -584,7 +579,7 @@ def postprocess_datasets(session: Session) -> None:
             if schema:
                 try:
                     extra_json = json.loads(extra) if extra else {}
-                except json.decoder.JSONDecodeError:
+                except json.JSONDecodeError:
                     extra_json = {}
                 extra_json["schema"] = schema
                 updates["extra_json"] = json.dumps(extra_json)
@@ -636,14 +631,30 @@ def postprocess_columns(session: Session) -> None:
         return
 
     def get_joined_tables(offset, limit):
+        # Import aliased from sqlalchemy
+        from sqlalchemy.orm import aliased
+
+        # Create alias of NewColumn
+        new_column_alias = aliased(NewColumn)
+        # Get subquery and give it the alias "sl_colums_2"
+        subquery = (
+            session.query(new_column_alias)
+            .offset(offset)
+            .limit(limit)
+            .subquery("sl_columns_2")
+        )
+
         return (
             sa.join(
-                session.query(NewColumn)
-                .offset(offset)
-                .limit(limit)
-                .subquery("sl_columns"),
+                subquery,
+                NewColumn,
+                # Use column id from subquery
+                subquery.c.id == NewColumn.id,
+            )
+            .join(
                 dataset_column_association_table,
-                dataset_column_association_table.c.column_id == NewColumn.id,
+                # Use column id from subquery
+                dataset_column_association_table.c.column_id == subquery.c.id,
             )
             .join(
                 NewDataset,
@@ -661,12 +672,14 @@ def postprocess_columns(session: Session) -> None:
             .join(Database, Database.id == NewDataset.database_id)
             .join(
                 TableColumn,
-                TableColumn.uuid == NewColumn.uuid,
+                # Use column uuid from subquery
+                TableColumn.uuid == subquery.c.uuid,
                 isouter=True,
             )
             .join(
                 SqlMetric,
-                SqlMetric.uuid == NewColumn.uuid,
+                # Use column uuid from subquery
+                SqlMetric.uuid == subquery.c.uuid,
                 isouter=True,
             )
         )
@@ -758,7 +771,7 @@ def postprocess_columns(session: Session) -> None:
         ) in session.execute(query):
             try:
                 extra = json.loads(extra_json) if extra_json else {}
-            except json.decoder.JSONDecodeError:
+            except json.JSONDecodeError:
                 extra = {}
             updated_extra = {**extra}
             updates = {}
@@ -769,7 +782,7 @@ def postprocess_columns(session: Session) -> None:
                 updates["external_url"] = external_url
 
             # update extra json
-            for (key, val) in (
+            for key, val in (
                 {
                     "verbose_name": verbose_name,
                     "python_date_format": python_date_format,

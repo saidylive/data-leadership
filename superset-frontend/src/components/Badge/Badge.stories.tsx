@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import Badge, { BadgeProps } from '.';
 
 export default {
@@ -74,40 +73,32 @@ InteractiveBadge.argTypes = {
   status: {
     control: {
       type: 'select',
-      options: [undefined, ...STATUSES],
     },
+    options: [undefined, ...STATUSES],
   },
   size: {
     control: {
       type: 'select',
-      options: SIZES.options,
     },
+    options: SIZES.options,
   },
   color: {
     control: {
       type: 'select',
-      options: [undefined, ...COLORS.options],
     },
+    options: [undefined, ...COLORS.options],
   },
   textColor: {
     control: {
       type: 'select',
-      options: [undefined, ...COLORS.options],
     },
+    options: [undefined, ...COLORS.options],
   },
   count: {
     control: {
       type: 'select',
-      options: [undefined, ...Array(100).keys()],
     },
-  },
-};
-
-InteractiveBadge.story = {
-  parameters: {
-    knobs: {
-      disable: true,
-    },
+    options: [undefined, ...Array(100).keys()],
   },
 };
 
@@ -143,30 +134,20 @@ export const BadgeTextGallery = () => (
   </>
 );
 
-BadgeGallery.story = {
-  parameters: {
-    actions: {
-      disable: true,
-    },
-    controls: {
-      disable: true,
-    },
-    knobs: {
-      disable: true,
-    },
+BadgeGallery.parameters = {
+  actions: {
+    disable: true,
+  },
+  controls: {
+    disable: true,
   },
 };
 
-BadgeTextGallery.story = {
-  parameters: {
-    actions: {
-      disable: true,
-    },
-    controls: {
-      disable: true,
-    },
-    knobs: {
-      disable: true,
-    },
+BadgeTextGallery.parameters = {
+  actions: {
+    disable: true,
+  },
+  controls: {
+    disable: true,
   },
 };

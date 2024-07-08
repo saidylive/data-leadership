@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useMemo } from 'react';
+import { useMemo, FC } from 'react';
+
 import { bindActionCreators } from 'redux';
 import { useSelector, useDispatch, shallowEqual } from 'react-redux';
 import { Dropdown } from 'src/components/Dropdown';
@@ -41,19 +42,25 @@ const TabTitle = styled.span`
   text-transform: none;
 `;
 
+const IconContainer = styled.div`
+  display: inline-block;
+  width: ${({ theme }) => theme.gridUnit * 8}px;
+  text-align: center;
+`;
+
 interface Props {
   queryEditor: QueryEditor;
 }
 
-const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
+const SqlEditorTabHeader: FC<Props> = ({ queryEditor }) => {
   const qe = useSelector<SqlLabRootState, QueryEditor>(
     ({ sqlLab: { unsavedQueryEditor } }) => ({
       ...queryEditor,
-      ...(queryEditor.id === unsavedQueryEditor.id && unsavedQueryEditor),
+      ...(queryEditor.id === unsavedQueryEditor?.id && unsavedQueryEditor),
     }),
     shallowEqual,
   );
-  const queryStatus = useSelector<SqlLabRootState, QueryState>(
+  const queryState = useSelector<SqlLabRootState, QueryState>(
     ({ sqlLab }) => sqlLab.queries[qe.latestQueryId || '']?.state || '',
   );
   const dispatch = useDispatch();
@@ -75,7 +82,7 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
   function renameTab() {
     const newTitle = prompt(t('Enter a new title for the tab'));
     if (newTitle) {
-      actions.queryEditorSetTitle(qe, newTitle);
+      actions.queryEditorSetTitle(qe, newTitle, qe.id);
     }
   }
 
@@ -91,9 +98,9 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
               onClick={() => actions.removeQueryEditor(qe)}
               data-test="close-tab-menu-option"
             >
-              <div className="icon-container">
+              <IconContainer>
                 <i className="fa fa-close" />
-              </div>
+              </IconContainer>
               {t('Close tab')}
             </Menu.Item>
             <Menu.Item
@@ -101,9 +108,9 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
               onClick={renameTab}
               data-test="rename-tab-menu-option"
             >
-              <div className="icon-container">
+              <IconContainer>
                 <i className="fa fa-i-cursor" />
-              </div>
+              </IconContainer>
               {t('Rename tab')}
             </Menu.Item>
             <Menu.Item
@@ -111,9 +118,9 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
               onClick={() => actions.toggleLeftBar(qe)}
               data-test="toggle-menu-option"
             >
-              <div className="icon-container">
+              <IconContainer>
                 <i className="fa fa-cogs" />
-              </div>
+              </IconContainer>
               {qe.hideLeftBar ? t('Expand tool bar') : t('Hide tool bar')}
             </Menu.Item>
             <Menu.Item
@@ -121,9 +128,9 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
               onClick={() => actions.removeAllOtherQueryEditors(qe)}
               data-test="close-all-other-menu-option"
             >
-              <div className="icon-container">
+              <IconContainer>
                 <i className="fa fa-times-circle-o" />
-              </div>
+              </IconContainer>
               {t('Close all other tabs')}
             </Menu.Item>
             <Menu.Item
@@ -131,15 +138,15 @@ const SqlEditorTabHeader: React.FC<Props> = ({ queryEditor }) => {
               onClick={() => actions.cloneQueryToNewTab(qe, false)}
               data-test="clone-tab-menu-option"
             >
-              <div className="icon-container">
+              <IconContainer>
                 <i className="fa fa-files-o" />
-              </div>
+              </IconContainer>
               {t('Duplicate tab')}
             </Menu.Item>
           </Menu>
         }
       />
-      <TabTitle>{qe.name}</TabTitle> <TabStatusIcon tabState={queryStatus} />{' '}
+      <TabTitle>{qe.name}</TabTitle> <TabStatusIcon tabState={queryState} />{' '}
     </TabTitleWrapper>
   );
 };

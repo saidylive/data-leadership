@@ -16,13 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import cx from 'classnames';
+import { css, styled } from '@superset-ui/core';
 
 import PopoverDropdown from 'src/components/PopoverDropdown';
 import EditableTitle from 'src/components/EditableTitle';
-import DragDroppable from 'src/dashboard/components/dnd/DragDroppable';
+import { Draggable } from 'src/dashboard/components/dnd/DragDroppable';
 import DragHandle from 'src/dashboard/components/dnd/DragHandle';
 import AnchorLink from 'src/dashboard/components/AnchorLink';
 import HoverMenu from 'src/dashboard/components/menu/HoverMenu';
@@ -55,7 +56,65 @@ const propTypes = {
 
 const defaultProps = {};
 
-class Header extends React.PureComponent {
+const HeaderStyles = styled.div`
+  ${({ theme }) => css`
+    font-weight: ${theme.typography.weights.bold};
+    width: 100%;
+    padding: ${theme.gridUnit * 4}px 0;
+
+    &.header-small {
+      font-size: ${theme.typography.sizes.l}px;
+    }
+
+    &.header-medium {
+      font-size: ${theme.typography.sizes.xl}px;
+    }
+
+    &.header-large {
+      font-size: ${theme.typography.sizes.xxl}px;
+    }
+
+    .dashboard--editing .dashboard-grid & {
+      &:after {
+        border: 1px dashed transparent;
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      &:hover:after {
+        border: 1px dashed ${theme.colors.primary.base};
+        z-index: 2;
+      }
+    }
+
+    .dashboard--editing .dragdroppable-row & {
+      cursor: move;
+    }
+
+    /**
+   * grids add margin between items, so don't double pad within columns
+   * we'll not worry about double padding on top as it can serve as a visual separator
+   */
+    .grid-column > :not(:last-child) & {
+      margin-bottom: ${theme.gridUnit * -4}px;
+    }
+
+    .background--white &,
+    &.background--white,
+    .dashboard-component-tabs & {
+      padding-left: ${theme.gridUnit * 4}px;
+      padding-right: ${theme.gridUnit * 4}px;
+    }
+  `}
+`;
+
+class Header extends PureComponent {
   constructor(props) {
     super(props);
     this.state = {
@@ -119,7 +178,7 @@ class Header extends React.PureComponent {
     );
 
     return (
-      <DragDroppable
+      <Draggable
         component={component}
         parentComponent={parentComponent}
         orientation="row"
@@ -129,7 +188,7 @@ class Header extends React.PureComponent {
         disableDragDrop={isFocused}
         editMode={editMode}
       >
-        {({ dropIndicatorProps, dragSourceRef }) => (
+        {({ dragSourceRef }) => (
           <div ref={dragSourceRef}>
             {editMode &&
               depth <= 2 && ( // drag handle looks bad when nested
@@ -154,7 +213,7 @@ class Header extends React.PureComponent {
               ]}
               editMode={editMode}
             >
-              <div
+              <HeaderStyles
                 className={cx(
                   'dashboard-component',
                   'dashboard-component-header',
@@ -178,13 +237,11 @@ class Header extends React.PureComponent {
                 {!editMode && (
                   <AnchorLink id={component.id} dashboardId={dashboardId} />
                 )}
-              </div>
+              </HeaderStyles>
             </WithPopoverMenu>
-
-            {dropIndicatorProps && <div {...dropIndicatorProps} />}
           </div>
         )}
-      </DragDroppable>
+      </Draggable>
     );
   }
 }

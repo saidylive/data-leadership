@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { Provider } from 'react-redux';
 import {
   render,
@@ -129,7 +128,7 @@ describe('FilterScope', () => {
       expect(screen.getByRole('tree')).toBeInTheDocument();
       expect(
         document.querySelectorAll('.ant-tree-checkbox-checked').length,
-      ).toBe(1);
+      ).toBe(4);
     });
   });
 });

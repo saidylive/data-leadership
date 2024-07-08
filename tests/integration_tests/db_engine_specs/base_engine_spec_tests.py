@@ -30,18 +30,18 @@ from superset.db_engine_specs.base import (
 from superset.db_engine_specs.mysql import MySQLEngineSpec
 from superset.db_engine_specs.sqlite import SqliteEngineSpec
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from superset.sql_parse import ParsedQuery
+from superset.sql_parse import ParsedQuery, Table
 from superset.utils.database import get_example_database
 from tests.integration_tests.db_engine_specs.base_tests import TestDbEngineSpec
 from tests.integration_tests.test_app import app
 
 from ..fixtures.birth_names_dashboard import (
-    load_birth_names_dashboard_with_slices,
-    load_birth_names_data,
+    load_birth_names_dashboard_with_slices,  # noqa: F401
+    load_birth_names_data,  # noqa: F401
 )
 from ..fixtures.energy_dashboard import (
-    load_energy_table_data,
-    load_energy_table_with_slice,
+    load_energy_table_data,  # noqa: F401
+    load_energy_table_with_slice,  # noqa: F401
 )
 from ..fixtures.pyodbcRow import Row
 
@@ -229,16 +229,16 @@ class TestDbEngineSpecs(TestDbEngineSpec):
 
         """ Make sure base engine spec removes schema name from table name
         ie. when try_remove_schema_from_table_name == True. """
-        base_result_expected = ["table", "table_2"]
+        base_result_expected = {"table", "table_2"}
         base_result = BaseEngineSpec.get_table_names(
             database=mock.ANY, schema="schema", inspector=inspector
         )
-        self.assertListEqual(base_result_expected, base_result)
+        assert base_result_expected == base_result
 
     @pytest.mark.usefixtures("load_energy_table_with_slice")
     def test_column_datatype_to_string(self):
         example_db = get_example_database()
-        sqla_table = example_db.get_table("energy_usage")
+        sqla_table = example_db.get_table(Table("energy_usage"))
         dialect = example_db.get_dialect()
 
         # TODO: fix column type conversion for presto.
@@ -308,10 +308,7 @@ class TestDbEngineSpecs(TestDbEngineSpec):
         }
         sql = table.get_query_str(query_obj)
         assert (
-            """ORDER BY case
-             when gender='boy' then 'male'
-             else 'female'
-         end ASC;"""
+            "ORDER BY\n  CASE WHEN gender = 'boy' THEN 'male' ELSE 'female' END ASC"
             in sql
         )
 
@@ -332,11 +329,12 @@ def test_is_readonly():
 
 def test_time_grain_denylist():
     config = app.config.copy()
-    app.config["TIME_GRAIN_DENYLIST"] = ["PT1M"]
+    app.config["TIME_GRAIN_DENYLIST"] = ["PT1M", "SQLITE_NONEXISTENT_GRAIN"]
 
     with app.app_context():
         time_grain_functions = SqliteEngineSpec.get_time_grain_expressions()
-        assert not "PT1M" in time_grain_functions
+        assert "PT1M" not in time_grain_functions  # noqa: E713
+        assert "SQLITE_NONEXISTENT_GRAIN" not in time_grain_functions  # noqa: E713
 
     app.config = config
 
@@ -395,7 +393,7 @@ def test_get_time_grain_with_config():
     app.config = config
 
 
-def test_get_time_grain_with_unkown_values():
+def test_get_time_grain_with_unknown_values():
     """Should concatenate from configs and then sort in the proper order
     putting unknown patterns at the end"""
     config = app.config.copy()
@@ -421,67 +419,76 @@ def test_validate(is_port_open, is_hostname_valid):
     is_hostname_valid.return_value = True
     is_port_open.return_value = True
 
-    parameters = {
-        "host": "localhost",
-        "port": 5432,
-        "username": "username",
-        "password": "password",
-        "database": "dbname",
-        "query": {"sslmode": "verify-full"},
+    properties = {
+        "parameters": {
+            "host": "localhost",
+            "port": 5432,
+            "username": "username",
+            "password": "password",
+            "database": "dbname",
+            "query": {"sslmode": "verify-full"},
+        }
     }
-    errors = BasicParametersMixin.validate_parameters(parameters)
+    errors = BasicParametersMixin.validate_parameters(properties)
     assert errors == []
 
 
 def test_validate_parameters_missing():
-    parameters = {
-        "host": "",
-        "port": None,
-        "username": "",
-        "password": "",
-        "database": "",
-        "query": {},
+    properties = {
+        "parameters": {
+            "host": "",
+            "port": None,
+            "username": "",
+            "password": "",
+            "database": "",
+            "query": {},
+        }
     }
-    errors = BasicParametersMixin.validate_parameters(parameters)
-    assert errors == [
-        SupersetError(
-            message=(
-                "One or more parameters are missing: " "database, host, port, username"
+    with app.app_context():
+        errors = BasicParametersMixin.validate_parameters(properties)
+        assert errors == [
+            SupersetError(
+                message=(
+                    "One or more parameters are missing: "
+                    "database, host, port, username"
+                ),
+                error_type=SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR,
+                level=ErrorLevel.WARNING,
+                extra={"missing": ["database", "host", "port", "username"]},
             ),
-            error_type=SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR,
-            level=ErrorLevel.WARNING,
-            extra={"missing": ["database", "host", "port", "username"]},
-        ),
-    ]
+        ]
 
 
 @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
 def test_validate_parameters_invalid_host(is_hostname_valid):
     is_hostname_valid.return_value = False
 
-    parameters = {
-        "host": "localhost",
-        "port": None,
-        "username": "username",
-        "password": "password",
-        "database": "dbname",
-        "query": {"sslmode": "verify-full"},
+    properties = {
+        "parameters": {
+            "host": "localhost",
+            "port": None,
+            "username": "username",
+            "password": "password",
+            "database": "dbname",
+            "query": {"sslmode": "verify-full"},
+        }
     }
-    errors = BasicParametersMixin.validate_parameters(parameters)
-    assert errors == [
-        SupersetError(
-            message="One or more parameters are missing: port",
-            error_type=SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR,
-            level=ErrorLevel.WARNING,
-            extra={"missing": ["port"]},
-        ),
-        SupersetError(
-            message="The hostname provided can't be resolved.",
-            error_type=SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
-            level=ErrorLevel.ERROR,
-            extra={"invalid": ["host"]},
-        ),
-    ]
+    with app.app_context():
+        errors = BasicParametersMixin.validate_parameters(properties)
+        assert errors == [
+            SupersetError(
+                message="One or more parameters are missing: port",
+                error_type=SupersetErrorType.CONNECTION_MISSING_PARAMETERS_ERROR,
+                level=ErrorLevel.WARNING,
+                extra={"missing": ["port"]},
+            ),
+            SupersetError(
+                message="The hostname provided can't be resolved.",
+                error_type=SupersetErrorType.CONNECTION_INVALID_HOSTNAME_ERROR,
+                level=ErrorLevel.ERROR,
+                extra={"invalid": ["host"]},
+            ),
+        ]
 
 
 @mock.patch("superset.db_engine_specs.base.is_hostname_valid")
@@ -490,25 +497,50 @@ def test_validate_parameters_port_closed(is_port_open, is_hostname_valid):
     is_hostname_valid.return_value = True
     is_port_open.return_value = False
 
-    parameters = {
-        "host": "localhost",
-        "port": 5432,
-        "username": "username",
-        "password": "password",
-        "database": "dbname",
-        "query": {"sslmode": "verify-full"},
+    properties = {
+        "parameters": {
+            "host": "localhost",
+            "port": 5432,
+            "username": "username",
+            "password": "password",
+            "database": "dbname",
+            "query": {"sslmode": "verify-full"},
+        }
     }
-    errors = BasicParametersMixin.validate_parameters(parameters)
-    assert errors == [
-        SupersetError(
-            message="The port is closed.",
-            error_type=SupersetErrorType.CONNECTION_PORT_CLOSED_ERROR,
-            level=ErrorLevel.ERROR,
-            extra={
-                "invalid": ["port"],
-                "issue_codes": [
-                    {"code": 1008, "message": "Issue 1008 - The port is closed."}
-                ],
-            },
-        )
+    with app.app_context():
+        errors = BasicParametersMixin.validate_parameters(properties)
+        assert errors == [
+            SupersetError(
+                message="The port is closed.",
+                error_type=SupersetErrorType.CONNECTION_PORT_CLOSED_ERROR,
+                level=ErrorLevel.ERROR,
+                extra={
+                    "invalid": ["port"],
+                    "issue_codes": [
+                        {"code": 1008, "message": "Issue 1008 - The port is closed."}
+                    ],
+                },
+            )
+        ]
+
+
+def test_get_indexes():
+    indexes = [
+        {
+            "name": "partition",
+            "column_names": ["a", "b"],
+            "unique": False,
+        },
     ]
+
+    inspector = mock.Mock()
+    inspector.get_indexes = mock.Mock(return_value=indexes)
+
+    assert (
+        BaseEngineSpec.get_indexes(
+            database=mock.Mock(),
+            inspector=inspector,
+            table=Table("bar", "foo"),
+        )
+        == indexes
+    )

@@ -16,8 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import {
+  isValidElement,
+  cloneElement,
+  CSSProperties,
+  ReactNode,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { isNil } from 'lodash';
+import { ModalFuncProps } from 'antd/lib/modal';
 import { styled, t } from '@superset-ui/core';
 import { css } from '@emotion/react';
 import { AntdModal, AntdModalProps } from 'src/components';
@@ -32,8 +41,9 @@ import Draggable, {
 
 export interface ModalProps {
   className?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   disablePrimaryButton?: boolean;
+  primaryTooltipMessage?: ReactNode;
   primaryButtonLoading?: boolean;
   onHide: () => void;
   onHandledPrimaryAction?: () => void;
@@ -41,13 +51,13 @@ export interface ModalProps {
   primaryButtonType?: 'primary' | 'danger';
   show: boolean;
   name?: string;
-  title: React.ReactNode;
+  title: ReactNode;
   width?: string;
   maxWidth?: string;
   responsive?: boolean;
   hideFooter?: boolean;
   centered?: boolean;
-  footer?: React.ReactNode;
+  footer?: ReactNode;
   wrapProps?: object;
   height?: string;
   closable?: boolean;
@@ -57,6 +67,8 @@ export interface ModalProps {
   draggableConfig?: DraggableProps;
   destroyOnClose?: boolean;
   maskClosable?: boolean;
+  zIndex?: number;
+  bodyStyle?: CSSProperties;
 }
 
 interface StyledModalProps {
@@ -223,6 +235,7 @@ const defaultResizableConfig = (hideFooter: boolean | undefined) => ({
 const CustomModal = ({
   children,
   disablePrimaryButton = false,
+  primaryTooltipMessage,
   primaryButtonLoading = false,
   onHide,
   onHandledPrimaryAction,
@@ -249,10 +262,12 @@ const CustomModal = ({
   const [bounds, setBounds] = useState<DraggableBounds>();
   const [dragDisabled, setDragDisabled] = useState<boolean>(true);
   let FooterComponent;
-  if (React.isValidElement(footer)) {
+  if (isValidElement(footer)) {
     // If a footer component is provided inject a closeModal function
     // so the footer can provide a "close" button if desired
-    FooterComponent = React.cloneElement(footer, { closeModal: onHide });
+    FooterComponent = cloneElement(footer, {
+      closeModal: onHide,
+    } as Partial<unknown>);
   }
   const modalFooter = isNil(FooterComponent)
     ? [
@@ -263,6 +278,7 @@ const CustomModal = ({
           key="submit"
           buttonStyle={primaryButtonType}
           disabled={disablePrimaryButton}
+          tooltip={primaryTooltipMessage}
           loading={primaryButtonLoading}
           onClick={onHandledPrimaryAction}
           cta
@@ -362,13 +378,26 @@ const CustomModal = ({
 };
 CustomModal.displayName = 'Modal';
 
+// Ant Design 4 does not allow overriding Modal's buttons when
+// using one of the pre-defined functions. Ant Design 5 Modal introduced
+// the footer property that will allow that. Meanwhile, we're replicating
+// Button style using global CSS in src/GlobalStyles.tsx.
+// TODO: Replace this logic when on Ant Design 5.
+const buttonProps = {
+  okButtonProps: { className: 'modal-functions-ok-button' },
+  cancelButtonProps: { className: 'modal-functions-cancel-button' },
+};
+
 // TODO: in another PR, rename this to CompatabilityModal
 // and demote it as the default export.
 // We should start using AntD component interfaces going forward.
 const Modal = Object.assign(CustomModal, {
-  error: AntdModal.error,
-  warning: AntdModal.warning,
-  confirm: AntdModal.confirm,
+  error: (config: ModalFuncProps) =>
+    AntdModal.error({ ...config, ...buttonProps }),
+  warning: (config: ModalFuncProps) =>
+    AntdModal.warning({ ...config, ...buttonProps }),
+  confirm: (config: ModalFuncProps) =>
+    AntdModal.confirm({ ...config, ...buttonProps }),
   useModal: AntdModal.useModal,
 });
 

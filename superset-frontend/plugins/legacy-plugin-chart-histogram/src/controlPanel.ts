@@ -22,17 +22,17 @@ import {
   ControlPanelConfig,
   ControlPanelState,
   formatSelectOptions,
-  sections,
   getStandardizedControls,
   sharedControls,
+  ControlState,
 } from '@superset-ui/chart-controls';
 
 const columnsConfig = {
   ...sharedControls.columns,
   label: t('Columns'),
   description: t('Select the numeric columns to draw the histogram'),
-  mapStateToProps: (state: ControlPanelState) => ({
-    ...(sharedControls.columns.mapStateToProps?.(state) || {}),
+  mapStateToProps: (state: ControlPanelState, controlState: ControlState) => ({
+    ...(sharedControls.columns.mapStateToProps?.(state, controlState) || {}),
     choices: columnChoices(state.datasource),
   }),
   validators: [validateNonEmpty],
@@ -40,7 +40,6 @@ const columnsConfig = {
 
 const config: ControlPanelConfig = {
   controlPanelSections: [
-    sections.legacyRegularTime,
     {
       label: t('Query'),
       expanded: true,

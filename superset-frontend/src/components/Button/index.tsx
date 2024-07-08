@@ -16,8 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { Children, ReactElement } from 'react';
-import { kebabCase } from 'lodash';
+import {
+  Children,
+  ReactElement,
+  ReactNode,
+  Fragment,
+  MouseEventHandler,
+} from 'react';
+
 import { mix } from 'polished';
 import cx from 'classnames';
 import { AntdButton } from 'src/components';
@@ -26,7 +32,7 @@ import { Tooltip } from 'src/components/Tooltip';
 import { ButtonProps as AntdButtonProps } from 'antd/lib/button';
 import { TooltipProps } from 'antd/lib/tooltip';
 
-export type OnClickHandler = React.MouseEventHandler<HTMLElement>;
+export type OnClickHandler = MouseEventHandler<HTMLElement>;
 
 export type ButtonStyle =
   | 'primary'
@@ -39,11 +45,13 @@ export type ButtonStyle =
   | 'link'
   | 'dashed';
 
+export type ButtonSize = 'default' | 'small' | 'xsmall';
+
 export type ButtonProps = Omit<AntdButtonProps, 'css'> &
   Pick<TooltipProps, 'placement'> & {
-    tooltip?: string;
+    tooltip?: ReactNode;
     className?: string;
-    buttonSize?: 'default' | 'small' | 'xsmall';
+    buttonSize?: ButtonSize;
     buttonStyle?: ButtonStyle;
     cta?: boolean;
     showMarginRight?: boolean;
@@ -146,7 +154,14 @@ export default function Button(props: ButtonProps) {
     <AntdButton
       href={disabled ? undefined : href}
       disabled={disabled}
-      className={cx(className, 'superset-button', { cta: !!cta })}
+      className={cx(
+        className,
+        'superset-button',
+        // A static class name containing the button style is available to
+        // support customizing button styles in embedded dashboards.
+        `superset-button-${buttonStyle}`,
+        { cta: !!cta },
+      )}
       css={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -205,11 +220,7 @@ export default function Button(props: ButtonProps) {
 
   if (tooltip) {
     return (
-      <Tooltip
-        placement={placement}
-        id={`${kebabCase(tooltip)}-tooltip`}
-        title={tooltip}
-      >
+      <Tooltip placement={placement} title={tooltip}>
         {/* wrap the button in a span so that the tooltip shows up
         when the button is disabled. */}
         {disabled ? (

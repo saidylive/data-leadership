@@ -16,8 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { shallow, mount } from 'enzyme';
+import {
+  styledMount as mount,
+  styledShallow as shallow,
+} from 'spec/helpers/theming';
 import sinon from 'sinon';
 
 import newComponentFactory from 'src/dashboard/util/newComponentFactory';

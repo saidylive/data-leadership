@@ -24,13 +24,14 @@ export type SelectOptionType = {
 export type FrameType =
   | 'Common'
   | 'Calendar'
+  | 'Current'
   | 'Custom'
   | 'Advanced'
   | 'No filter';
 
 export type DateTimeGrainType =
   | 'second'
-  | 'minite'
+  | 'minute'
   | 'hour'
   | 'day'
   | 'week'
@@ -85,7 +86,29 @@ export type CalendarRangeType =
   | typeof PreviousCalendarMonth
   | typeof PreviousCalendarYear;
 
+export const CurrentDay = 'Current day';
+export const CurrentWeek = 'Current week';
+export const CurrentMonth = 'Current month';
+export const CurrentYear = 'Current year';
+export const CurrentQuarter = 'Current quarter';
+export type CurrentRangeType =
+  | typeof CurrentDay
+  | typeof CurrentWeek
+  | typeof CurrentMonth
+  | typeof CurrentQuarter
+  | typeof CurrentYear;
+
 export type FrameComponentProps = {
   onChange: (timeRange: string) => void;
   value: string;
 };
+
+export interface DateFilterControlProps {
+  name: string;
+  onChange: (timeRange: string) => void;
+  value?: string;
+  onOpenPopover?: () => void;
+  onClosePopover?: () => void;
+  overlayStyle?: 'Modal' | 'Popover';
+  isOverflowingFilterBar?: boolean;
+}

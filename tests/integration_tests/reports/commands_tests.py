@@ -14,39 +14,55 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
-from unittest.mock import Mock, patch
+from typing import Optional
+from unittest.mock import call, Mock, patch
 from uuid import uuid4
 
 import pytest
 from flask import current_app
+from flask.ctx import AppContext
+from flask_appbuilder.security.sqla.models import User
 from flask_sqlalchemy import BaseQuery
 from freezegun import freeze_time
+from slack_sdk.errors import (
+    BotUserAccessError,
+    SlackApiError,
+    SlackClientConfigurationError,
+    SlackClientError,
+    SlackClientNotConnectedError,
+    SlackObjectFormationError,
+    SlackRequestError,
+    SlackTokenRotationError,
+)
 from sqlalchemy.sql import func
 
 from superset import db
-from superset.models.core import Database
-from superset.models.dashboard import Dashboard
-from superset.models.slice import Slice
-from superset.reports.commands.exceptions import (
+from superset.commands.report.exceptions import (
     AlertQueryError,
     AlertQueryInvalidTypeError,
     AlertQueryMultipleColumnsError,
     AlertQueryMultipleRowsError,
+    ReportScheduleClientErrorsException,
     ReportScheduleCsvFailedError,
     ReportScheduleCsvTimeout,
     ReportScheduleNotFoundError,
-    ReportScheduleNotificationError,
     ReportSchedulePreviousWorkingError,
     ReportScheduleScreenshotFailedError,
     ReportScheduleScreenshotTimeout,
+    ReportScheduleSystemErrorsException,
     ReportScheduleWorkingTimeoutError,
 )
-from superset.reports.commands.execute import AsyncExecuteReportScheduleCommand
-from superset.reports.commands.log_prune import AsyncPruneReportScheduleLogCommand
+from superset.commands.report.execute import (
+    AsyncExecuteReportScheduleCommand,
+    BaseReportState,
+)
+from superset.commands.report.log_prune import AsyncPruneReportScheduleLogCommand
+from superset.exceptions import SupersetException
+from superset.models.core import Database
+from superset.models.dashboard import Dashboard
+from superset.models.slice import Slice
 from superset.reports.models import (
     ReportDataFormat,
     ReportExecutionLog,
@@ -55,20 +71,26 @@ from superset.reports.models import (
     ReportScheduleValidatorType,
     ReportState,
 )
+from superset.reports.notifications.exceptions import (
+    NotificationError,
+    NotificationParamException,
+)
+from superset.tasks.types import ExecutorType
+from superset.utils import json
 from superset.utils.database import get_example_database
 from tests.integration_tests.fixtures.birth_names_dashboard import (
-    load_birth_names_dashboard_with_slices,
-    load_birth_names_data,
+    load_birth_names_dashboard_with_slices,  # noqa: F401
+    load_birth_names_data,  # noqa: F401
 )
 from tests.integration_tests.fixtures.world_bank_dashboard import (
-    load_world_bank_dashboard_with_slices_module_scope,
-    load_world_bank_data,
+    load_world_bank_dashboard_with_slices_module_scope,  # noqa: F401
+    load_world_bank_data,  # noqa: F401
 )
 from tests.integration_tests.reports.utils import (
     cleanup_report_schedule,
     create_report_notification,
     CSV_FILE,
-    OWNER_EMAIL,
+    DEFAULT_OWNER_EMAIL,
     SCREENSHOT_FILE,
     TEST_ID,
 )
@@ -79,7 +101,7 @@ pytestmark = pytest.mark.usefixtures(
 )
 
 
-def get_target_from_report_schedule(report_schedule: ReportSchedule) -> List[str]:
+def get_target_from_report_schedule(report_schedule: ReportSchedule) -> list[str]:
     return [
         json.loads(recipient.recipient_config_json)["target"]
         for recipient in report_schedule.recipients
@@ -129,207 +151,203 @@ def assert_log(state: str, error_message: Optional[str] = None):
 
 @contextmanager
 def create_test_table_context(database: Database):
-    database.get_sqla_engine().execute(
-        "CREATE TABLE test_table AS SELECT 1 as first, 2 as second"
-    )
-    database.get_sqla_engine().execute(
-        "INSERT INTO test_table (first, second) VALUES (1, 2)"
-    )
-    database.get_sqla_engine().execute(
-        "INSERT INTO test_table (first, second) VALUES (3, 4)"
-    )
+    with database.get_sqla_engine() as engine:
+        engine.execute("CREATE TABLE test_table AS SELECT 1 as first, 2 as second")
+        engine.execute("INSERT INTO test_table (first, second) VALUES (1, 2)")
+        engine.execute("INSERT INTO test_table (first, second) VALUES (3, 4)")
 
     yield db.session
-    database.get_sqla_engine().execute("DROP TABLE test_table")
+    with database.get_sqla_engine() as engine:
+        engine.execute("DROP TABLE test_table")
 
 
 @pytest.fixture()
 def create_report_email_chart():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        report_schedule = create_report_notification(
-            email_target="target@email.com", chart=chart
-        )
-        yield report_schedule
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        email_target="target@email.com", chart=chart
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
+
+
+@pytest.fixture()
+def create_report_email_chart_alpha_owner(get_user):
+    owners = [get_user("alpha")]
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        email_target="target@email.com", chart=chart, owners=owners
+    )
+    yield report_schedule
+
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_chart_force_screenshot():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        report_schedule = create_report_notification(
-            email_target="target@email.com", chart=chart, force_screenshot=True
-        )
-        yield report_schedule
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        email_target="target@email.com", chart=chart, force_screenshot=True
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_chart_with_csv():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        chart.query_context = '{"mock": "query_context"}'
-        report_schedule = create_report_notification(
-            email_target="target@email.com",
-            chart=chart,
-            report_format=ReportDataFormat.DATA,
-        )
-        yield report_schedule
-        cleanup_report_schedule(report_schedule)
+    chart = db.session.query(Slice).first()
+    chart.query_context = '{"mock": "query_context"}'
+    report_schedule = create_report_notification(
+        email_target="target@email.com",
+        chart=chart,
+        report_format=ReportDataFormat.CSV,
+    )
+    yield report_schedule
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_chart_with_text():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        chart.query_context = '{"mock": "query_context"}'
-        report_schedule = create_report_notification(
-            email_target="target@email.com",
-            chart=chart,
-            report_format=ReportDataFormat.TEXT,
-        )
-        yield report_schedule
-        cleanup_report_schedule(report_schedule)
+    chart = db.session.query(Slice).first()
+    chart.query_context = '{"mock": "query_context"}'
+    report_schedule = create_report_notification(
+        email_target="target@email.com",
+        chart=chart,
+        report_format=ReportDataFormat.TEXT,
+    )
+    yield report_schedule
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_chart_with_csv_no_query_context():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        chart.query_context = None
-        report_schedule = create_report_notification(
-            email_target="target@email.com",
-            chart=chart,
-            report_format=ReportDataFormat.DATA,
-            name="report_csv_no_query_context",
-        )
-        yield report_schedule
-        cleanup_report_schedule(report_schedule)
+    chart = db.session.query(Slice).first()
+    chart.query_context = None
+    report_schedule = create_report_notification(
+        email_target="target@email.com",
+        chart=chart,
+        report_format=ReportDataFormat.CSV,
+        name="report_csv_no_query_context",
+    )
+    yield report_schedule
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_dashboard():
-    with app.app_context():
-        dashboard = db.session.query(Dashboard).first()
-        report_schedule = create_report_notification(
-            email_target="target@email.com", dashboard=dashboard
-        )
-        yield report_schedule
+    dashboard = db.session.query(Dashboard).first()
+    report_schedule = create_report_notification(
+        email_target="target@email.com", dashboard=dashboard
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_email_dashboard_force_screenshot():
-    with app.app_context():
-        dashboard = db.session.query(Dashboard).first()
-        report_schedule = create_report_notification(
-            email_target="target@email.com", dashboard=dashboard, force_screenshot=True
-        )
-        yield report_schedule
+    dashboard = db.session.query(Dashboard).first()
+    report_schedule = create_report_notification(
+        email_target="target@email.com", dashboard=dashboard, force_screenshot=True
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_slack_chart():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        report_schedule = create_report_notification(
-            slack_channel="slack_channel", chart=chart
-        )
-        yield report_schedule
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        slack_channel="slack_channel", chart=chart
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_slack_chart_with_csv():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        chart.query_context = '{"mock": "query_context"}'
-        report_schedule = create_report_notification(
-            slack_channel="slack_channel",
-            chart=chart,
-            report_format=ReportDataFormat.DATA,
-        )
-        yield report_schedule
+    chart = db.session.query(Slice).first()
+    chart.query_context = '{"mock": "query_context"}'
+    report_schedule = create_report_notification(
+        slack_channel="slack_channel",
+        chart=chart,
+        report_format=ReportDataFormat.CSV,
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_slack_chart_with_text():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        chart.query_context = '{"mock": "query_context"}'
-        report_schedule = create_report_notification(
-            slack_channel="slack_channel",
-            chart=chart,
-            report_format=ReportDataFormat.TEXT,
-        )
-        yield report_schedule
+    chart = db.session.query(Slice).first()
+    chart.query_context = '{"mock": "query_context"}'
+    report_schedule = create_report_notification(
+        slack_channel="slack_channel",
+        chart=chart,
+        report_format=ReportDataFormat.TEXT,
+    )
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_report_slack_chart_working():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        report_schedule = create_report_notification(
-            slack_channel="slack_channel", chart=chart
-        )
-        report_schedule.last_state = ReportState.WORKING
-        report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
-        report_schedule.last_value = None
-        report_schedule.last_value_row_json = None
-        db.session.commit()
-        log = ReportExecutionLog(
-            scheduled_dttm=report_schedule.last_eval_dttm,
-            start_dttm=report_schedule.last_eval_dttm,
-            end_dttm=report_schedule.last_eval_dttm,
-            value=report_schedule.last_value,
-            value_row_json=report_schedule.last_value_row_json,
-            state=ReportState.WORKING,
-            report_schedule=report_schedule,
-            uuid=uuid4(),
-        )
-        db.session.add(log)
-        db.session.commit()
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        slack_channel="slack_channel", chart=chart
+    )
+    report_schedule.last_state = ReportState.WORKING
+    report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
+    report_schedule.last_value = None
+    report_schedule.last_value_row_json = None
+    db.session.commit()
+    log = ReportExecutionLog(
+        scheduled_dttm=report_schedule.last_eval_dttm,
+        start_dttm=report_schedule.last_eval_dttm,
+        end_dttm=report_schedule.last_eval_dttm,
+        value=report_schedule.last_value,
+        value_row_json=report_schedule.last_value_row_json,
+        state=ReportState.WORKING,
+        report_schedule=report_schedule,
+        uuid=uuid4(),
+    )
+    db.session.add(log)
+    db.session.commit()
 
-        yield report_schedule
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture()
 def create_alert_slack_chart_success():
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        report_schedule = create_report_notification(
-            slack_channel="slack_channel",
-            chart=chart,
-            report_type=ReportScheduleType.ALERT,
-        )
-        report_schedule.last_state = ReportState.SUCCESS
-        report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
+    chart = db.session.query(Slice).first()
+    report_schedule = create_report_notification(
+        slack_channel="slack_channel",
+        chart=chart,
+        report_type=ReportScheduleType.ALERT,
+    )
+    report_schedule.last_state = ReportState.SUCCESS
+    report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
 
-        log = ReportExecutionLog(
-            report_schedule=report_schedule,
-            state=ReportState.SUCCESS,
-            start_dttm=report_schedule.last_eval_dttm,
-            end_dttm=report_schedule.last_eval_dttm,
-            scheduled_dttm=report_schedule.last_eval_dttm,
-        )
-        db.session.add(log)
-        db.session.commit()
-        yield report_schedule
+    log = ReportExecutionLog(
+        report_schedule=report_schedule,
+        state=ReportState.SUCCESS,
+        start_dttm=report_schedule.last_eval_dttm,
+        end_dttm=report_schedule.last_eval_dttm,
+        scheduled_dttm=report_schedule.last_eval_dttm,
+    )
+    db.session.add(log)
+    db.session.commit()
+    yield report_schedule
 
-        cleanup_report_schedule(report_schedule)
+    cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture(
@@ -345,36 +363,33 @@ def create_alert_slack_chart_grace(request):
             "validator_config_json": '{"op": "<", "threshold": 10}',
         },
     }
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        example_database = get_example_database()
-        with create_test_table_context(example_database):
-            report_schedule = create_report_notification(
-                slack_channel="slack_channel",
-                chart=chart,
-                report_type=ReportScheduleType.ALERT,
-                database=example_database,
-                sql=param_config[request.param]["sql"],
-                validator_type=param_config[request.param]["validator_type"],
-                validator_config_json=param_config[request.param][
-                    "validator_config_json"
-                ],
-            )
-            report_schedule.last_state = ReportState.GRACE
-            report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
+    chart = db.session.query(Slice).first()
+    example_database = get_example_database()
+    with create_test_table_context(example_database):
+        report_schedule = create_report_notification(
+            slack_channel="slack_channel",
+            chart=chart,
+            report_type=ReportScheduleType.ALERT,
+            database=example_database,
+            sql=param_config[request.param]["sql"],
+            validator_type=param_config[request.param]["validator_type"],
+            validator_config_json=param_config[request.param]["validator_config_json"],
+        )
+        report_schedule.last_state = ReportState.GRACE
+        report_schedule.last_eval_dttm = datetime(2020, 1, 1, 0, 0)
 
-            log = ReportExecutionLog(
-                report_schedule=report_schedule,
-                state=ReportState.SUCCESS,
-                start_dttm=report_schedule.last_eval_dttm,
-                end_dttm=report_schedule.last_eval_dttm,
-                scheduled_dttm=report_schedule.last_eval_dttm,
-            )
-            db.session.add(log)
-            db.session.commit()
-            yield report_schedule
+        log = ReportExecutionLog(
+            report_schedule=report_schedule,
+            state=ReportState.SUCCESS,
+            start_dttm=report_schedule.last_eval_dttm,
+            end_dttm=report_schedule.last_eval_dttm,
+            scheduled_dttm=report_schedule.last_eval_dttm,
+        )
+        db.session.add(log)
+        db.session.commit()
+        yield report_schedule
 
-            cleanup_report_schedule(report_schedule)
+        cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture(
@@ -432,26 +447,22 @@ def create_alert_email_chart(request):
             "validator_config_json": '{"op": ">", "threshold": 54.999}',
         },
     }
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        example_database = get_example_database()
-        with create_test_table_context(example_database):
+    chart = db.session.query(Slice).first()
+    example_database = get_example_database()
+    with create_test_table_context(example_database):
+        report_schedule = create_report_notification(
+            email_target="target@email.com",
+            chart=chart,
+            report_type=ReportScheduleType.ALERT,
+            database=example_database,
+            sql=param_config[request.param]["sql"],
+            validator_type=param_config[request.param]["validator_type"],
+            validator_config_json=param_config[request.param]["validator_config_json"],
+            force_screenshot=True,
+        )
+        yield report_schedule
 
-            report_schedule = create_report_notification(
-                email_target="target@email.com",
-                chart=chart,
-                report_type=ReportScheduleType.ALERT,
-                database=example_database,
-                sql=param_config[request.param]["sql"],
-                validator_type=param_config[request.param]["validator_type"],
-                validator_config_json=param_config[request.param][
-                    "validator_config_json"
-                ],
-                force_screenshot=True,
-            )
-            yield report_schedule
-
-            cleanup_report_schedule(report_schedule)
+        cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture(
@@ -515,25 +526,21 @@ def create_no_alert_email_chart(request):
             "validator_config_json": '{"op": ">", "threshold": 0}',
         },
     }
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        example_database = get_example_database()
-        with create_test_table_context(example_database):
+    chart = db.session.query(Slice).first()
+    example_database = get_example_database()
+    with create_test_table_context(example_database):
+        report_schedule = create_report_notification(
+            email_target="target@email.com",
+            chart=chart,
+            report_type=ReportScheduleType.ALERT,
+            database=example_database,
+            sql=param_config[request.param]["sql"],
+            validator_type=param_config[request.param]["validator_type"],
+            validator_config_json=param_config[request.param]["validator_config_json"],
+        )
+        yield report_schedule
 
-            report_schedule = create_report_notification(
-                email_target="target@email.com",
-                chart=chart,
-                report_type=ReportScheduleType.ALERT,
-                database=example_database,
-                sql=param_config[request.param]["sql"],
-                validator_type=param_config[request.param]["validator_type"],
-                validator_config_json=param_config[request.param][
-                    "validator_config_json"
-                ],
-            )
-            yield report_schedule
-
-            cleanup_report_schedule(report_schedule)
+        cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture(params=["alert1", "alert2"])
@@ -550,29 +557,25 @@ def create_mul_alert_email_chart(request):
             "validator_config_json": '{"op": "<", "threshold": 10}',
         },
     }
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        example_database = get_example_database()
-        with create_test_table_context(example_database):
+    chart = db.session.query(Slice).first()
+    example_database = get_example_database()
+    with create_test_table_context(example_database):
+        report_schedule = create_report_notification(
+            email_target="target@email.com",
+            chart=chart,
+            report_type=ReportScheduleType.ALERT,
+            database=example_database,
+            sql=param_config[request.param]["sql"],
+            validator_type=param_config[request.param]["validator_type"],
+            validator_config_json=param_config[request.param]["validator_config_json"],
+        )
+        yield report_schedule
 
-            report_schedule = create_report_notification(
-                email_target="target@email.com",
-                chart=chart,
-                report_type=ReportScheduleType.ALERT,
-                database=example_database,
-                sql=param_config[request.param]["sql"],
-                validator_type=param_config[request.param]["validator_type"],
-                validator_config_json=param_config[request.param][
-                    "validator_config_json"
-                ],
-            )
-            yield report_schedule
-
-            cleanup_report_schedule(report_schedule)
+        cleanup_report_schedule(report_schedule)
 
 
 @pytest.fixture(params=["alert1", "alert2"])
-def create_invalid_sql_alert_email_chart(request):
+def create_invalid_sql_alert_email_chart(request, app_context: AppContext):
     param_config = {
         "alert1": {
             "sql": "SELECT 'string' ",
@@ -585,26 +588,22 @@ def create_invalid_sql_alert_email_chart(request):
             "validator_config_json": '{"op": "<", "threshold": 10}',
         },
     }
-    with app.app_context():
-        chart = db.session.query(Slice).first()
-        example_database = get_example_database()
-        with create_test_table_context(example_database):
+    chart = db.session.query(Slice).first()
+    example_database = get_example_database()
+    with create_test_table_context(example_database):
+        report_schedule = create_report_notification(
+            email_target="target@email.com",
+            chart=chart,
+            report_type=ReportScheduleType.ALERT,
+            database=example_database,
+            sql=param_config[request.param]["sql"],
+            validator_type=param_config[request.param]["validator_type"],
+            validator_config_json=param_config[request.param]["validator_config_json"],
+            grace_period=60 * 60,
+        )
+        yield report_schedule
 
-            report_schedule = create_report_notification(
-                email_target="target@email.com",
-                chart=chart,
-                report_type=ReportScheduleType.ALERT,
-                database=example_database,
-                sql=param_config[request.param]["sql"],
-                validator_type=param_config[request.param]["validator_type"],
-                validator_config_json=param_config[request.param][
-                    "validator_config_json"
-                ],
-                grace_period=60 * 60,
-            )
-            yield report_schedule
-
-            cleanup_report_schedule(report_schedule)
+        cleanup_report_schedule(report_schedule)
 
 
 @pytest.mark.usefixtures(
@@ -633,11 +632,9 @@ def test_email_chart_report_schedule(
         )
         # assert that the link sent is correct
         assert (
-            '<a href="http://0.0.0.0:8080/explore/?'
-            "form_data=%7B%22slice_id%22%3A%20"
-            f"{create_report_email_chart.chart.id}%7D&"
-            'standalone=0&force=false">Explore in Superset</a>'
-            in email_mock.call_args[0][2]
+            '<a href="http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+'
+            f"{create_report_email_chart.chart.id}"
+            '%7D&force=false">Explore in Superset</a>' in email_mock.call_args[0][2]
         )
         # Assert the email smtp address
         assert email_mock.call_args[0][0] == notification_targets[0]
@@ -646,6 +643,65 @@ def test_email_chart_report_schedule(
         assert smtp_images[list(smtp_images.keys())[0]] == SCREENSHOT_FILE
         # Assert logs are correct
         assert_log(ReportState.SUCCESS)
+
+
+@pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_email_chart_alpha_owner"
+)
+@patch("superset.reports.notifications.email.send_email_smtp")
+@patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
+def test_email_chart_report_schedule_alpha_owner(
+    screenshot_mock,
+    email_mock,
+    create_report_email_chart_alpha_owner,
+):
+    """
+    ExecuteReport Command: Test chart email report schedule with screenshot
+    executed as the chart owner
+    """
+    config_key = "ALERT_REPORTS_EXECUTE_AS"
+    original_config_value = app.config[config_key]
+    app.config[config_key] = [ExecutorType.OWNER]
+
+    # setup screenshot mock
+    username = ""
+
+    def _screenshot_side_effect(user: User) -> Optional[bytes]:
+        nonlocal username
+        username = user.username
+
+        return SCREENSHOT_FILE
+
+    screenshot_mock.side_effect = _screenshot_side_effect
+
+    with freeze_time("2020-01-01T00:00:00Z"):
+        AsyncExecuteReportScheduleCommand(
+            TEST_ID,
+            create_report_email_chart_alpha_owner.id,
+            datetime.utcnow(),
+        ).run()
+
+        notification_targets = get_target_from_report_schedule(
+            create_report_email_chart_alpha_owner
+        )
+        # assert that the screenshot is executed as the chart owner
+        assert username == "alpha"
+
+        # assert that the link sent is correct
+        assert (
+            '<a href="http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+'
+            f"{create_report_email_chart_alpha_owner.chart.id}"
+            '%7D&force=false">Explore in Superset</a>' in email_mock.call_args[0][2]
+        )
+        # Assert the email smtp address
+        assert email_mock.call_args[0][0] == notification_targets[0]
+        # Assert the email inline screenshot
+        smtp_images = email_mock.call_args[1]["images"]
+        assert smtp_images[list(smtp_images.keys())[0]] == SCREENSHOT_FILE
+        # Assert logs are correct
+        assert_log(ReportState.SUCCESS)
+
+    app.config[config_key] = original_config_value
 
 
 @pytest.mark.usefixtures(
@@ -670,7 +726,9 @@ def test_email_chart_report_schedule_force_screenshot(
 
     with freeze_time("2020-01-01T00:00:00Z"):
         AsyncExecuteReportScheduleCommand(
-            TEST_ID, create_report_email_chart_force_screenshot.id, datetime.utcnow()
+            TEST_ID,
+            create_report_email_chart_force_screenshot.id,
+            datetime.utcnow(),
         ).run()
 
         notification_targets = get_target_from_report_schedule(
@@ -678,11 +736,9 @@ def test_email_chart_report_schedule_force_screenshot(
         )
         # assert that the link sent is correct
         assert (
-            '<a href="http://0.0.0.0:8080/explore/?'
-            "form_data=%7B%22slice_id%22%3A%20"
-            f"{create_report_email_chart_force_screenshot.chart.id}%7D&"
-            'standalone=0&force=true">Explore in Superset</a>'
-            in email_mock.call_args[0][2]
+            '<a href="http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+'
+            f"{create_report_email_chart_force_screenshot.chart.id}"
+            '%7D&force=true">Explore in Superset</a>' in email_mock.call_args[0][2]
         )
         # Assert the email smtp address
         assert email_mock.call_args[0][0] == notification_targets[0]
@@ -717,11 +773,9 @@ def test_email_chart_alert_schedule(
         notification_targets = get_target_from_report_schedule(create_alert_email_chart)
         # assert that the link sent is correct
         assert (
-            '<a href="http://0.0.0.0:8080/explore/?'
-            "form_data=%7B%22slice_id%22%3A%20"
-            f"{create_alert_email_chart.chart.id}%7D&"
-            'standalone=0&force=true">Explore in Superset</a>'
-            in email_mock.call_args[0][2]
+            '<a href="http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+'
+            f"{create_alert_email_chart.chart.id}"
+            '%7D&force=true">Explore in Superset</a>' in email_mock.call_args[0][2]
         )
         # Assert the email smtp address
         assert email_mock.call_args[0][0] == notification_targets[0]
@@ -758,7 +812,8 @@ def test_email_chart_report_dry_run(
 
 
 @pytest.mark.usefixtures(
-    "load_birth_names_dashboard_with_slices", "create_report_email_chart_with_csv"
+    "load_birth_names_dashboard_with_slices",
+    "create_report_email_chart_with_csv",
 )
 @patch("superset.utils.csv.urllib.request.urlopen")
 @patch("superset.utils.csv.urllib.request.OpenerDirector.open")
@@ -791,11 +846,9 @@ def test_email_chart_report_schedule_with_csv(
         )
         # assert that the link sent is correct
         assert (
-            '<a href="http://0.0.0.0:8080/explore/?'
-            "form_data=%7B%22slice_id%22%3A%20"
+            '<a href="http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+'
             f"{create_report_email_chart_with_csv.chart.id}%7D&"
-            'standalone=0&force=false">Explore in Superset</a>'
-            in email_mock.call_args[0][2]
+            'force=false">Explore in Superset</a>' in email_mock.call_args[0][2]
         )
         # Assert the email smtp address
         assert email_mock.call_args[0][0] == notification_targets[0]
@@ -848,7 +901,8 @@ def test_email_chart_report_schedule_with_csv_no_query_context(
 
 
 @pytest.mark.usefixtures(
-    "load_birth_names_dashboard_with_slices", "create_report_email_chart_with_text"
+    "load_birth_names_dashboard_with_slices",
+    "create_report_email_chart_with_text",
 )
 @patch("superset.utils.csv.urllib.request.urlopen")
 @patch("superset.utils.csv.urllib.request.OpenerDirector.open")
@@ -993,7 +1047,6 @@ def test_email_dashboard_report_schedule(
 
     with freeze_time("2020-01-01T00:00:00Z"):
         with patch.object(current_app.config["STATS_LOGGER"], "gauge") as statsd_mock:
-
             AsyncExecuteReportScheduleCommand(
                 TEST_ID, create_report_email_dashboard.id, datetime.utcnow()
             ).run()
@@ -1049,11 +1102,11 @@ def test_email_dashboard_report_schedule_force_screenshot(
 @pytest.mark.usefixtures(
     "load_birth_names_dashboard_with_slices", "create_report_slack_chart"
 )
-@patch("superset.reports.notifications.slack.WebClient.files_upload")
+@patch("superset.reports.notifications.slack.get_slack_client")
 @patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
 def test_slack_chart_report_schedule(
     screenshot_mock,
-    file_upload_mock,
+    slack_client_mock,
     create_report_slack_chart,
 ):
     """
@@ -1061,20 +1114,28 @@ def test_slack_chart_report_schedule(
     """
     # setup screenshot mock
     screenshot_mock.return_value = SCREENSHOT_FILE
+    notification_targets = get_target_from_report_schedule(create_report_slack_chart)
+
+    channel_name = notification_targets[0]
+    channel_id = "channel_id"
+    slack_client_mock.return_value.conversations_list.return_value = {
+        "channels": [{"id": channel_id, "name": channel_name}]
+    }
 
     with freeze_time("2020-01-01T00:00:00Z"):
         with patch.object(current_app.config["STATS_LOGGER"], "gauge") as statsd_mock:
-
             AsyncExecuteReportScheduleCommand(
                 TEST_ID, create_report_slack_chart.id, datetime.utcnow()
             ).run()
 
-            notification_targets = get_target_from_report_schedule(
-                create_report_slack_chart
+            assert (
+                slack_client_mock.return_value.files_upload_v2.call_args[1]["channel"]
+                == channel_id
             )
-
-            assert file_upload_mock.call_args[1]["channels"] == notification_targets[0]
-            assert file_upload_mock.call_args[1]["file"] == SCREENSHOT_FILE
+            assert (
+                slack_client_mock.return_value.files_upload_v2.call_args[1]["file"]
+                == SCREENSHOT_FILE
+            )
 
             # Assert logs are correct
             assert_log(ReportState.SUCCESS)
@@ -1082,9 +1143,106 @@ def test_slack_chart_report_schedule(
 
 
 @pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_slack_chart"
+)
+@patch("superset.reports.notifications.slack.get_slack_client")
+@patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
+def test_slack_chart_report_schedule_deprecated(
+    screenshot_mock,
+    slack_client_mock,
+    create_report_slack_chart,
+):
+    """
+    ExecuteReport Command: Test chart slack report schedule
+    """
+    # setup screenshot mock
+    screenshot_mock.return_value = SCREENSHOT_FILE
+    notification_targets = get_target_from_report_schedule(create_report_slack_chart)
+
+    channel_name = notification_targets[0]
+
+    slack_client_mock.return_value.conversations_list.side_effect = SlackApiError(
+        "Error", "Response"
+    )
+
+    with freeze_time("2020-01-01T00:00:00Z"):
+        with patch.object(current_app.config["STATS_LOGGER"], "gauge") as statsd_mock:
+            AsyncExecuteReportScheduleCommand(
+                TEST_ID, create_report_slack_chart.id, datetime.utcnow()
+            ).run()
+
+            assert (
+                slack_client_mock.return_value.files_upload.call_args[1]["channels"]
+                == channel_name
+            )
+            assert (
+                slack_client_mock.return_value.files_upload.call_args[1]["file"]
+                == SCREENSHOT_FILE
+            )
+
+            # Assert logs are correct
+            assert_log(ReportState.SUCCESS)
+            statsd_mock.assert_called_once_with("reports.slack.send.ok", 1)
+
+
+@pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_slack_chart"
+)
+@patch("superset.utils.slack.WebClient")
+@patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
+def test_slack_chart_report_schedule_with_errors(
+    screenshot_mock,
+    web_client_mock,
+    create_report_slack_chart,
+):
+    """
+    ExecuteReport Command: Test that all slack errors will
+    properly log something
+    """
+    # setup screenshot mock
+    screenshot_mock.return_value = SCREENSHOT_FILE
+
+    slack_errors = [
+        BotUserAccessError(),
+        SlackRequestError(),
+        SlackClientConfigurationError(),
+        SlackObjectFormationError(),
+        SlackTokenRotationError(api_error="foo"),
+        SlackClientNotConnectedError(),
+        SlackClientError(),
+        SlackApiError(message="foo", response="bar"),
+    ]
+
+    for idx, er in enumerate(slack_errors):
+        web_client_mock.side_effect = er
+
+        with pytest.raises(ReportScheduleClientErrorsException):
+            AsyncExecuteReportScheduleCommand(
+                TEST_ID, create_report_slack_chart.id, datetime.utcnow()
+            ).run()
+
+        db.session.commit()
+
+    # Assert errors are being logged
+
+    # Only one notification log is sent because it's in grace period
+    # for the rest of the reports
+    notification_logs_count = get_notification_error_sent_count(
+        create_report_slack_chart
+    )
+    error_logs = get_error_logs_query(create_report_slack_chart)
+
+    # check that we have two logs for each error
+    assert error_logs.count() == (len(slack_errors) + notification_logs_count) * 2
+
+    # check that each error has a message
+    assert len([log.error_message for log in error_logs]) == error_logs.count()
+
+
+@pytest.mark.usefixtures(
     "load_birth_names_dashboard_with_slices", "create_report_slack_chart_with_csv"
 )
-@patch("superset.reports.notifications.slack.WebClient.files_upload")
+@patch("superset.reports.notifications.slack.get_slack_client")
 @patch("superset.utils.csv.urllib.request.urlopen")
 @patch("superset.utils.csv.urllib.request.OpenerDirector.open")
 @patch("superset.utils.csv.get_chart_csv_data")
@@ -1092,7 +1250,7 @@ def test_slack_chart_report_schedule_with_csv(
     csv_mock,
     mock_open,
     mock_urlopen,
-    file_upload_mock,
+    slack_client_mock_class,
     create_report_slack_chart_with_csv,
 ):
     """
@@ -1105,16 +1263,82 @@ def test_slack_chart_report_schedule_with_csv(
     mock_urlopen.return_value.getcode.return_value = 200
     response.read.return_value = CSV_FILE
 
+    notification_targets = get_target_from_report_schedule(
+        create_report_slack_chart_with_csv
+    )
+
+    channel_name = notification_targets[0]
+    channel_id = "channel_id"
+    slack_client_mock_class.return_value = Mock()
+    slack_client_mock_class.return_value.conversations_list.return_value = {
+        "channels": [{"id": channel_id, "name": channel_name}]
+    }
+
     with freeze_time("2020-01-01T00:00:00Z"):
         AsyncExecuteReportScheduleCommand(
             TEST_ID, create_report_slack_chart_with_csv.id, datetime.utcnow()
         ).run()
 
-        notification_targets = get_target_from_report_schedule(
-            create_report_slack_chart_with_csv
+        assert (
+            slack_client_mock_class.return_value.files_upload_v2.call_args[1]["channel"]
+            == channel_id
         )
-        assert file_upload_mock.call_args[1]["channels"] == notification_targets[0]
-        assert file_upload_mock.call_args[1]["file"] == CSV_FILE
+        assert (
+            slack_client_mock_class.return_value.files_upload_v2.call_args[1]["file"]
+            == CSV_FILE
+        )
+
+        # Assert logs are correct
+        assert_log(ReportState.SUCCESS)
+
+
+@pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_slack_chart_with_csv"
+)
+@patch("superset.reports.notifications.slack.get_slack_client")
+@patch("superset.utils.csv.urllib.request.urlopen")
+@patch("superset.utils.csv.urllib.request.OpenerDirector.open")
+@patch("superset.utils.csv.get_chart_csv_data")
+def test_slack_chart_report_schedule_with_csv_deprecated_api(
+    csv_mock,
+    mock_open,
+    mock_urlopen,
+    slack_client_mock_class,
+    create_report_slack_chart_with_csv,
+):
+    """
+    ExecuteReport Command: Test chart slack report schedule with CSV
+    """
+    # setup csv mock
+    response = Mock()
+    mock_open.return_value = response
+    mock_urlopen.return_value = response
+    mock_urlopen.return_value.getcode.return_value = 200
+    response.read.return_value = CSV_FILE
+
+    notification_targets = get_target_from_report_schedule(
+        create_report_slack_chart_with_csv
+    )
+
+    channel_name = notification_targets[0]
+    slack_client_mock_class.return_value = Mock()
+    slack_client_mock_class.return_value.conversations_list.side_effect = SlackApiError(
+        "Error", "Response"
+    )
+
+    with freeze_time("2020-01-01T00:00:00Z"):
+        AsyncExecuteReportScheduleCommand(
+            TEST_ID, create_report_slack_chart_with_csv.id, datetime.utcnow()
+        ).run()
+
+        assert (
+            slack_client_mock_class.return_value.files_upload.call_args[1]["channels"]
+            == channel_name
+        )
+        assert (
+            slack_client_mock_class.return_value.files_upload.call_args[1]["file"]
+            == CSV_FILE
+        )
 
         # Assert logs are correct
         assert_log(ReportState.SUCCESS)
@@ -1123,15 +1347,15 @@ def test_slack_chart_report_schedule_with_csv(
 @pytest.mark.usefixtures(
     "load_birth_names_dashboard_with_slices", "create_report_slack_chart_with_text"
 )
-@patch("superset.reports.notifications.slack.WebClient.chat_postMessage")
 @patch("superset.utils.csv.urllib.request.urlopen")
 @patch("superset.utils.csv.urllib.request.OpenerDirector.open")
+@patch("superset.reports.notifications.slack.get_slack_client")
 @patch("superset.utils.csv.get_chart_dataframe")
 def test_slack_chart_report_schedule_with_text(
     dataframe_mock,
+    slack_client_mock_class,
     mock_open,
     mock_urlopen,
-    post_message_mock,
     create_report_slack_chart_with_text,
 ):
     """
@@ -1153,10 +1377,22 @@ def test_slack_chart_report_schedule_with_text(
                     },
                     "colnames": [("t1",), ("t2",), ("t3__sum",)],
                     "indexnames": [(0,), (1,)],
+                    "coltypes": [1, 1, 0],
                 },
             ],
         }
     ).encode("utf-8")
+
+    notification_targets = get_target_from_report_schedule(
+        create_report_slack_chart_with_text
+    )
+
+    channel_name = notification_targets[0]
+    channel_id = "channel_id"
+
+    slack_client_mock_class.return_value.conversations_list.return_value = {
+        "channels": [{"id": channel_id, "name": channel_name}]
+    }
 
     with freeze_time("2020-01-01T00:00:00Z"):
         AsyncExecuteReportScheduleCommand(
@@ -1167,10 +1403,98 @@ def test_slack_chart_report_schedule_with_text(
 |---:|:-----|:-----|:----------|
 |  0 | c11  | c12  | c13       |
 |  1 | c21  | c22  | c23       |"""
-        assert table_markdown in post_message_mock.call_args[1]["text"]
         assert (
-            f"<http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22%3A%20{create_report_slack_chart_with_text.chart.id}%7D&standalone=0&force=false|Explore in Superset>"
-            in post_message_mock.call_args[1]["text"]
+            table_markdown
+            in slack_client_mock_class.return_value.chat_postMessage.call_args[1][
+                "text"
+            ]
+        )
+        assert (
+            f"<http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+{create_report_slack_chart_with_text.chart.id}%7D&force=false|Explore in Superset>"
+            in slack_client_mock_class.return_value.chat_postMessage.call_args[1][
+                "text"
+            ]
+        )
+
+        # Assert logs are correct
+        assert_log(ReportState.SUCCESS)
+
+
+@pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_slack_chart_with_text"
+)
+@patch("superset.utils.csv.urllib.request.urlopen")
+@patch("superset.utils.csv.urllib.request.OpenerDirector.open")
+@patch("superset.reports.notifications.slack.get_slack_client")
+@patch("superset.utils.csv.get_chart_dataframe")
+def test_slack_chart_report_schedule_with_text_deprecated_slack_api(
+    dataframe_mock,
+    slack_client_mock_class,
+    mock_open,
+    mock_urlopen,
+    create_report_slack_chart_with_text,
+):
+    """
+    ExecuteReport Command: Test chart slack report schedule with text
+    """
+    # setup dataframe mock
+    response = Mock()
+    mock_open.return_value = response
+    mock_urlopen.return_value = response
+    mock_urlopen.return_value.getcode.return_value = 200
+    response.read.return_value = json.dumps(
+        {
+            "result": [
+                {
+                    "data": {
+                        "t1": {0: "c11", 1: "c21"},
+                        "t2": {0: "c12", 1: "c22"},
+                        "t3__sum": {0: "c13", 1: "c23"},
+                    },
+                    "colnames": [("t1",), ("t2",), ("t3__sum",)],
+                    "indexnames": [(0,), (1,)],
+                    "coltypes": [1, 1, 0],
+                },
+            ],
+        }
+    ).encode("utf-8")
+
+    notification_targets = get_target_from_report_schedule(
+        create_report_slack_chart_with_text
+    )
+
+    channel_name = notification_targets[0]
+
+    slack_client_mock_class.return_value.conversations_list.side_effect = SlackApiError(
+        "Error", "Response"
+    )
+
+    with freeze_time("2020-01-01T00:00:00Z"):
+        AsyncExecuteReportScheduleCommand(
+            TEST_ID, create_report_slack_chart_with_text.id, datetime.utcnow()
+        ).run()
+
+        table_markdown = """|    | t1   | t2   | t3__sum   |
+|---:|:-----|:-----|:----------|
+|  0 | c11  | c12  | c13       |
+|  1 | c21  | c22  | c23       |"""
+        assert (
+            table_markdown
+            in slack_client_mock_class.return_value.chat_postMessage.call_args[1][
+                "text"
+            ]
+        )
+        assert (
+            f"<http://0.0.0.0:8080/explore/?form_data=%7B%22slice_id%22:+{create_report_slack_chart_with_text.chart.id}%7D&force=false|Explore in Superset>"
+            in slack_client_mock_class.return_value.chat_postMessage.call_args[1][
+                "text"
+            ]
+        )
+        assert (
+            slack_client_mock_class.return_value.chat_postMessage.call_args[1][
+                "channel"
+            ]
+            == channel_name
         )
 
         # Assert logs are correct
@@ -1196,7 +1520,9 @@ def test_report_schedule_working(create_report_slack_chart_working):
     with freeze_time("2020-01-01T00:00:00Z"):
         with pytest.raises(ReportSchedulePreviousWorkingError):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_report_slack_chart_working.id, datetime.utcnow()
+                TEST_ID,
+                create_report_slack_chart_working.id,
+                datetime.utcnow(),
             ).run()
 
         assert_log(
@@ -1215,14 +1541,13 @@ def test_report_schedule_working_timeout(create_report_slack_chart_working):
         seconds=create_report_slack_chart_working.working_timeout + 1
     )
     with freeze_time(current_time):
-
         with pytest.raises(ReportScheduleWorkingTimeoutError):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_report_slack_chart_working.id, datetime.utcnow()
+                TEST_ID,
+                create_report_slack_chart_working.id,
+                datetime.utcnow(),
             ).run()
 
-    # Only needed for MySQL, understand why
-    db.session.commit()
     logs = db.session.query(ReportExecutionLog).all()
     # Two logs, first is created by fixture
     assert len(logs) == 2
@@ -1252,10 +1577,14 @@ def test_report_schedule_success_grace(create_alert_slack_chart_success):
 
 
 @pytest.mark.usefixtures("create_alert_slack_chart_grace")
-@patch("superset.reports.notifications.slack.WebClient.files_upload")
+@patch("superset.utils.slack.WebClient.files_upload")
 @patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
+@patch("superset.reports.notifications.slack.get_slack_client")
 def test_report_schedule_success_grace_end(
-    screenshot_mock, file_upload_mock, create_alert_slack_chart_grace
+    slack_client_mock_class,
+    screenshot_mock,
+    file_upload_mock,
+    create_alert_slack_chart_grace,
 ):
     """
     ExecuteReport Command: Test report schedule on grace to noop
@@ -1267,6 +1596,17 @@ def test_report_schedule_success_grace_end(
     current_time = create_alert_slack_chart_grace.last_eval_dttm + timedelta(
         seconds=create_alert_slack_chart_grace.grace_period + 1
     )
+
+    notification_targets = get_target_from_report_schedule(
+        create_alert_slack_chart_grace
+    )
+
+    channel_name = notification_targets[0]
+    channel_id = "channel_id"
+
+    slack_client_mock_class.return_value.conversations_list.return_value = {
+        "channels": [{"id": channel_id, "name": channel_name}]
+    }
 
     with freeze_time(current_time):
         AsyncExecuteReportScheduleCommand(
@@ -1297,7 +1637,7 @@ def test_alert_limit_is_applied(
             create_alert_email_chart.database.db_engine_spec,
             "fetch_data",
             return_value=None,
-        ) as fetch_data_mock:
+        ):  # noqa: F841
             AsyncExecuteReportScheduleCommand(
                 TEST_ID, create_alert_email_chart.id, datetime.utcnow()
             ).run()
@@ -1321,12 +1661,38 @@ def test_email_dashboard_report_fails(
     screenshot_mock.return_value = SCREENSHOT_FILE
     email_mock.side_effect = SMTPException("Could not connect to SMTP XPTO")
 
-    with pytest.raises(ReportScheduleNotificationError):
+    with pytest.raises(ReportScheduleSystemErrorsException):
         AsyncExecuteReportScheduleCommand(
             TEST_ID, create_report_email_dashboard.id, datetime.utcnow()
         ).run()
 
     assert_log(ReportState.ERROR, error_message="Could not connect to SMTP XPTO")
+
+
+@pytest.mark.usefixtures(
+    "load_birth_names_dashboard_with_slices", "create_report_email_dashboard"
+)
+@patch("superset.reports.notifications.email.send_email_smtp")
+@patch("superset.utils.screenshots.DashboardScreenshot.get_screenshot")
+def test_email_dashboard_report_fails_uncaught_exception(
+    screenshot_mock, email_mock, create_report_email_dashboard
+):
+    """
+    ExecuteReport Command: Test dashboard email report schedule notification fails
+    and logs with uncaught exception
+    """
+    # setup screenshot mock
+    from smtplib import SMTPException  # noqa: F401
+
+    screenshot_mock.return_value = SCREENSHOT_FILE
+    email_mock.side_effect = Exception("Uncaught exception")
+
+    with pytest.raises(Exception):
+        AsyncExecuteReportScheduleCommand(
+            TEST_ID, create_report_email_dashboard.id, datetime.utcnow()
+        ).run()
+
+    assert_log(ReportState.ERROR, error_message="Uncaught exception")
 
 
 @pytest.mark.usefixtures(
@@ -1393,9 +1759,10 @@ def test_slack_chart_alert_no_attachment(email_mock, create_alert_email_chart):
 
 
 @pytest.mark.usefixtures(
-    "load_birth_names_dashboard_with_slices", "create_report_slack_chart"
+    "load_birth_names_dashboard_with_slices",
+    "create_report_slack_chart",
 )
-@patch("superset.reports.notifications.slack.WebClient")
+@patch("superset.utils.slack.WebClient")
 @patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
 def test_slack_token_callable_chart_report(
     screenshot_mock,
@@ -1405,7 +1772,15 @@ def test_slack_token_callable_chart_report(
     """
     ExecuteReport Command: Test chart slack alert (slack token callable)
     """
+    notification_targets = get_target_from_report_schedule(create_report_slack_chart)
+
+    channel_name = notification_targets[0]
+    channel_id = "channel_id"
     slack_client_mock_class.return_value = Mock()
+    slack_client_mock_class.return_value.conversations_list.return_value = {
+        "channels": [{"id": channel_id, "name": channel_name}]
+    }
+
     app.config["SLACK_API_TOKEN"] = Mock(return_value="cool_code")
     # setup screenshot mock
     screenshot_mock.return_value = SCREENSHOT_FILE
@@ -1414,12 +1789,12 @@ def test_slack_token_callable_chart_report(
         AsyncExecuteReportScheduleCommand(
             TEST_ID, create_report_slack_chart.id, datetime.utcnow()
         ).run()
-        app.config["SLACK_API_TOKEN"].assert_called_once()
+        app.config["SLACK_API_TOKEN"].assert_called()
         assert slack_client_mock_class.called_with(token="cool_code", proxy="")
         assert_log(ReportState.SUCCESS)
 
 
-@pytest.mark.usefixtures("create_no_alert_email_chart")
+@pytest.mark.usefixtures("app_context")
 def test_email_chart_no_alert(create_no_alert_email_chart):
     """
     ExecuteReport Command: Test chart email no alert
@@ -1431,7 +1806,7 @@ def test_email_chart_no_alert(create_no_alert_email_chart):
     assert_log(ReportState.NOOP)
 
 
-@pytest.mark.usefixtures("create_mul_alert_email_chart")
+@pytest.mark.usefixtures("app_context")
 def test_email_mul_alert(create_mul_alert_email_chart):
     """
     ExecuteReport Command: Test chart email multiple rows
@@ -1455,7 +1830,7 @@ def test_soft_timeout_alert(email_mock, create_alert_email_chart):
     """
     from celery.exceptions import SoftTimeLimitExceeded
 
-    from superset.reports.commands.exceptions import AlertQueryTimeout
+    from superset.commands.report.exceptions import AlertQueryTimeout
 
     with patch.object(
         create_alert_email_chart.database.db_engine_spec, "execute", return_value=None
@@ -1466,9 +1841,9 @@ def test_soft_timeout_alert(email_mock, create_alert_email_chart):
                 TEST_ID, create_alert_email_chart.id, datetime.utcnow()
             ).run()
 
-    notification_targets = get_target_from_report_schedule(create_alert_email_chart)
+    get_target_from_report_schedule(create_alert_email_chart)  # noqa: F841
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR, error_message="A timeout occurred while executing the query."
@@ -1497,7 +1872,7 @@ def test_soft_timeout_screenshot(screenshot_mock, email_mock, create_alert_email
         ).run()
 
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR, error_message="A timeout occurred while taking a screenshot."
@@ -1533,11 +1908,9 @@ def test_soft_timeout_csv(
             TEST_ID, create_report_email_chart_with_csv.id, datetime.utcnow()
         ).run()
 
-    notification_targets = get_target_from_report_schedule(
-        create_report_email_chart_with_csv
-    )
+    get_target_from_report_schedule(create_report_email_chart_with_csv)  # noqa: F841
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR,
@@ -1573,11 +1946,9 @@ def test_generate_no_csv(
             TEST_ID, create_report_email_chart_with_csv.id, datetime.utcnow()
         ).run()
 
-    notification_targets = get_target_from_report_schedule(
-        create_report_email_chart_with_csv
-    )
+    get_target_from_report_schedule(create_report_email_chart_with_csv)  # noqa: F841
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR,
@@ -1594,9 +1965,9 @@ def test_fail_screenshot(screenshot_mock, email_mock, create_report_email_chart)
     """
     ExecuteReport Command: Test soft timeout on screenshot
     """
-    from celery.exceptions import SoftTimeLimitExceeded
+    from celery.exceptions import SoftTimeLimitExceeded  # noqa: F401
 
-    from superset.reports.commands.exceptions import AlertQueryTimeout
+    from superset.commands.report.exceptions import AlertQueryTimeout  # noqa: F401
 
     screenshot_mock.side_effect = Exception("Unexpected error")
     with pytest.raises(ReportScheduleScreenshotFailedError):
@@ -1604,9 +1975,9 @@ def test_fail_screenshot(screenshot_mock, email_mock, create_report_email_chart)
             TEST_ID, create_report_email_chart.id, datetime.utcnow()
         ).run()
 
-    notification_targets = get_target_from_report_schedule(create_report_email_chart)
+    get_target_from_report_schedule(create_report_email_chart)  # noqa: F841
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR, error_message="Failed taking a screenshot Unexpected error"
@@ -1639,7 +2010,7 @@ def test_fail_csv(
 
     get_target_from_report_schedule(create_report_email_chart_with_csv)
     # Assert the email smtp address, asserts a notification was sent with the error
-    assert email_mock.call_args[0][0] == OWNER_EMAIL
+    assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
 
     assert_log(
         ReportState.ERROR, error_message="Failed generating csv <urlopen error 500>"
@@ -1672,7 +2043,6 @@ def test_email_disable_screenshot(email_mock, create_alert_email_chart):
     assert_log(ReportState.SUCCESS)
 
 
-@pytest.mark.usefixtures("create_invalid_sql_alert_email_chart")
 @patch("superset.reports.notifications.email.send_email_smtp")
 def test_invalid_sql_alert(email_mock, create_invalid_sql_alert_email_chart):
     """
@@ -1681,17 +2051,16 @@ def test_invalid_sql_alert(email_mock, create_invalid_sql_alert_email_chart):
     with freeze_time("2020-01-01T00:00:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
 
-        notification_targets = get_target_from_report_schedule(
-            create_invalid_sql_alert_email_chart
-        )
         # Assert the email smtp address, asserts a notification was sent with the error
-        assert email_mock.call_args[0][0] == OWNER_EMAIL
+        assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
+        assert_log(ReportState.ERROR)
 
 
-@pytest.mark.usefixtures("create_invalid_sql_alert_email_chart")
 @patch("superset.reports.notifications.email.send_email_smtp")
 def test_grace_period_error(email_mock, create_invalid_sql_alert_email_chart):
     """
@@ -1700,16 +2069,13 @@ def test_grace_period_error(email_mock, create_invalid_sql_alert_email_chart):
     with freeze_time("2020-01-01T00:00:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
 
-        # Only needed for MySQL, understand why
-        db.session.commit()
-        notification_targets = get_target_from_report_schedule(
-            create_invalid_sql_alert_email_chart
-        )
         # Assert the email smtp address, asserts a notification was sent with the error
-        assert email_mock.call_args[0][0] == OWNER_EMAIL
+        assert email_mock.call_args[0][0] == DEFAULT_OWNER_EMAIL
         assert (
             get_notification_error_sent_count(create_invalid_sql_alert_email_chart) == 1
         )
@@ -1717,7 +2083,9 @@ def test_grace_period_error(email_mock, create_invalid_sql_alert_email_chart):
     with freeze_time("2020-01-01T00:30:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
         db.session.commit()
         assert (
@@ -1728,7 +2096,9 @@ def test_grace_period_error(email_mock, create_invalid_sql_alert_email_chart):
     with freeze_time("2020-01-01T01:30:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
         db.session.commit()
         assert (
@@ -1736,7 +2106,6 @@ def test_grace_period_error(email_mock, create_invalid_sql_alert_email_chart):
         )
 
 
-@pytest.mark.usefixtures("create_invalid_sql_alert_email_chart")
 @patch("superset.reports.notifications.email.send_email_smtp")
 @patch("superset.utils.screenshots.ChartScreenshot.get_screenshot")
 def test_grace_period_error_flap(
@@ -1750,7 +2119,9 @@ def test_grace_period_error_flap(
     with freeze_time("2020-01-01T00:00:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
         db.session.commit()
         # Assert we have 1 notification sent on the log
@@ -1761,7 +2132,9 @@ def test_grace_period_error_flap(
     with freeze_time("2020-01-01T00:30:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
         db.session.commit()
         assert (
@@ -1771,7 +2144,6 @@ def test_grace_period_error_flap(
     # Change report_schedule to valid
     create_invalid_sql_alert_email_chart.sql = "SELECT 1 AS metric"
     create_invalid_sql_alert_email_chart.grace_period = 0
-    db.session.merge(create_invalid_sql_alert_email_chart)
     db.session.commit()
 
     with freeze_time("2020-01-01T00:31:00Z"):
@@ -1788,7 +2160,6 @@ def test_grace_period_error_flap(
 
     create_invalid_sql_alert_email_chart.sql = "SELECT 'first'"
     create_invalid_sql_alert_email_chart.grace_period = 10
-    db.session.merge(create_invalid_sql_alert_email_chart)
     db.session.commit()
 
     # assert that after a success, when back to error we send the error notification
@@ -1796,7 +2167,9 @@ def test_grace_period_error_flap(
     with freeze_time("2020-01-01T00:32:00Z"):
         with pytest.raises((AlertQueryError, AlertQueryInvalidTypeError)):
             AsyncExecuteReportScheduleCommand(
-                TEST_ID, create_invalid_sql_alert_email_chart.id, datetime.utcnow()
+                TEST_ID,
+                create_invalid_sql_alert_email_chart.id,
+                datetime.utcnow(),
             ).run()
         db.session.commit()
         assert (
@@ -1807,7 +2180,7 @@ def test_grace_period_error_flap(
 @pytest.mark.usefixtures(
     "load_birth_names_dashboard_with_slices", "create_report_email_dashboard"
 )
-@patch("superset.reports.dao.ReportScheduleDAO.bulk_delete_logs")
+@patch("superset.daos.report.ReportScheduleDAO.bulk_delete_logs")
 def test_prune_log_soft_time_out(bulk_delete_logs, create_report_email_dashboard):
     from celery.exceptions import SoftTimeLimitExceeded
 
@@ -1815,3 +2188,61 @@ def test_prune_log_soft_time_out(bulk_delete_logs, create_report_email_dashboard
     with pytest.raises(SoftTimeLimitExceeded) as excinfo:
         AsyncPruneReportScheduleLogCommand().run()
     assert str(excinfo.value) == "SoftTimeLimitExceeded()"
+
+
+@patch("superset.commands.report.execute.logger")
+@patch("superset.commands.report.execute.create_notification")
+def test__send_with_client_errors(notification_mock, logger_mock):
+    notification_content = "I am some content"
+    recipients = ["test@foo.com"]
+    notification_mock.return_value.send.side_effect = NotificationParamException()
+    with pytest.raises(ReportScheduleClientErrorsException) as excinfo:
+        BaseReportState._send(BaseReportState, notification_content, recipients)
+
+    assert excinfo.errisinstance(SupersetException)
+    logger_mock.warning.assert_called_with(
+        "SupersetError(message='', error_type=<SupersetErrorType.REPORT_NOTIFICATION_ERROR: 'REPORT_NOTIFICATION_ERROR'>, level=<ErrorLevel.WARNING: 'warning'>, extra=None)"
+    )
+
+
+@patch("superset.commands.report.execute.logger")
+@patch("superset.commands.report.execute.create_notification")
+def test__send_with_multiple_errors(notification_mock, logger_mock):
+    notification_content = "I am some content"
+    recipients = ["test@foo.com", "test2@bar.com"]
+    notification_mock.return_value.send.side_effect = [
+        NotificationParamException(),
+        NotificationError(),
+    ]
+    # it raises the error with a 500 status if present
+    with pytest.raises(ReportScheduleSystemErrorsException) as excinfo:
+        BaseReportState._send(BaseReportState, notification_content, recipients)
+
+    assert excinfo.errisinstance(SupersetException)
+    # it logs both errors as warnings
+    logger_mock.warning.assert_has_calls(
+        [
+            call(
+                "SupersetError(message='', error_type=<SupersetErrorType.REPORT_NOTIFICATION_ERROR: 'REPORT_NOTIFICATION_ERROR'>, level=<ErrorLevel.WARNING: 'warning'>, extra=None)"
+            ),
+            call(
+                "SupersetError(message='', error_type=<SupersetErrorType.REPORT_NOTIFICATION_ERROR: 'REPORT_NOTIFICATION_ERROR'>, level=<ErrorLevel.ERROR: 'error'>, extra=None)"
+            ),
+        ]
+    )
+
+
+@patch("superset.commands.report.execute.logger")
+@patch("superset.commands.report.execute.create_notification")
+def test__send_with_server_errors(notification_mock, logger_mock):
+    notification_content = "I am some content"
+    recipients = ["test@foo.com"]
+    notification_mock.return_value.send.side_effect = NotificationError()
+    with pytest.raises(ReportScheduleSystemErrorsException) as excinfo:
+        BaseReportState._send(BaseReportState, notification_content, recipients)
+
+    assert excinfo.errisinstance(SupersetException)
+    # it logs the error
+    logger_mock.warning.assert_called_with(
+        "SupersetError(message='', error_type=<SupersetErrorType.REPORT_NOTIFICATION_ERROR: 'REPORT_NOTIFICATION_ERROR'>, level=<ErrorLevel.ERROR: 'error'>, extra=None)"
+    )

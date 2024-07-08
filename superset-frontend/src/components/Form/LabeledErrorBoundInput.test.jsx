@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { render, fireEvent, screen } from 'spec/helpers/testing-library';
 import LabeledErrorBoundInput from 'src/components/Form/LabeledErrorBoundInput';
 
@@ -74,5 +73,19 @@ describe('LabeledErrorBoundInput', () => {
     expect(label).toBeVisible();
     expect(textboxInput).toBeVisible();
     expect(await screen.findByText('This is a tooltip')).toBeInTheDocument();
+  });
+
+  it('becomes a password input if visibilityToggle prop is passed in', async () => {
+    defaultProps.visibilityToggle = true;
+    render(<LabeledErrorBoundInput {...defaultProps} />);
+
+    expect(await screen.findByTestId('icon-eye')).toBeVisible();
+  });
+
+  it('becomes a password input if props.name === password (backwards compatibility)', async () => {
+    defaultProps.name = 'password';
+    render(<LabeledErrorBoundInput {...defaultProps} />);
+
+    expect(await screen.findByTestId('icon-eye')).toBeVisible();
   });
 });

@@ -17,10 +17,15 @@
  * under the License.
  */
 import PropTypes from 'prop-types';
-import React from 'react';
-import { styled, logging, t, ensureIsArray } from '@superset-ui/core';
-
-import { isFeatureEnabled, FeatureFlag } from 'src/featureFlags';
+import { PureComponent } from 'react';
+import {
+  ensureIsArray,
+  FeatureFlag,
+  isFeatureEnabled,
+  logging,
+  styled,
+  t,
+} from '@superset-ui/core';
 import { PLACEHOLDER_DATASOURCE } from 'src/dashboard/constants';
 import Loading from 'src/components/Loading';
 import { EmptyStateBig } from 'src/components/EmptyState';
@@ -28,6 +33,8 @@ import ErrorBoundary from 'src/components/ErrorBoundary';
 import { Logger, LOG_ACTIONS_RENDER_CHART } from 'src/logger/LogUtils';
 import { URL_PARAMS } from 'src/constants';
 import { getUrlParam } from 'src/utils/urlUtils';
+import { isCurrentUserBot } from 'src/utils/isBot';
+import { ChartSource } from 'src/types/ChartSource';
 import { ResourceStatus } from 'src/hooks/apiResources/apiResources';
 import ChartRenderer from './ChartRenderer';
 import { ChartErrorMessage } from './ChartErrorMessage';
@@ -47,8 +54,8 @@ const propTypes = {
   // formData contains chart's own filter parameter
   // and merged with extra filter that current dashboard applying
   formData: PropTypes.object.isRequired,
-  labelColors: PropTypes.object,
-  sharedLabelColors: PropTypes.object,
+  labelsColor: PropTypes.object,
+  labelsColorMap: PropTypes.object,
   width: PropTypes.number,
   height: PropTypes.number,
   setControlValue: PropTypes.func,
@@ -57,7 +64,6 @@ const propTypes = {
   triggerRender: PropTypes.bool,
   force: PropTypes.bool,
   isFiltersInitialized: PropTypes.bool,
-  isDeactivatedViz: PropTypes.bool,
   // state
   chartAlert: PropTypes.string,
   chartStatus: PropTypes.string,
@@ -74,6 +80,8 @@ const propTypes = {
   ownState: PropTypes.object,
   postTransformProps: PropTypes.func,
   datasetsStatus: PropTypes.oneOf(['loading', 'error', 'complete']),
+  isInView: PropTypes.bool,
+  emitCrossFilters: PropTypes.bool,
 };
 
 const BLANK = {};
@@ -90,13 +98,14 @@ const defaultProps = {
   triggerRender: false,
   dashboardId: null,
   chartStackTrace: null,
-  isDeactivatedViz: false,
   force: false,
+  isInView: true,
 };
 
 const Styles = styled.div`
   min-height: ${p => p.height}px;
   position: relative;
+  text-align: center;
 
   .chart-tooltip {
     opacity: 0.75;
@@ -104,12 +113,35 @@ const Styles = styled.div`
   }
 
   .slice_container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+
     height: ${p => p.height}px;
 
     .pivot_table tbody tr {
       font-feature-settings: 'tnum' 1;
     }
+
+    .alert {
+      margin: ${({ theme }) => theme.gridUnit * 2}px;
+    }
   }
+`;
+
+const LoadingDiv = styled.div`
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 80%;
+  transform: translate(-50%, -50%);
+`;
+
+const MessageSpan = styled.span`
+  display: block;
+  margin: ${({ theme }) => theme.gridUnit * 4}px auto;
+  width: fit-content;
+  color: ${({ theme }) => theme.colors.grayscale.base};
 `;
 
 const MonospaceDiv = styled.div`
@@ -119,7 +151,7 @@ const MonospaceDiv = styled.div`
   white-space: pre-wrap;
 `;
 
-class Chart extends React.PureComponent {
+class Chart extends PureComponent {
   constructor(props) {
     super(props);
     this.handleRenderContainerFailure =
@@ -127,51 +159,27 @@ class Chart extends React.PureComponent {
   }
 
   componentDidMount() {
-    // during migration, hold chart queries before user choose review or cancel
-    if (
-      this.props.triggerQuery &&
-      this.props.filterboxMigrationState !== 'UNDECIDED'
-    ) {
+    if (this.props.triggerQuery) {
       this.runQuery();
     }
   }
 
   componentDidUpdate() {
-    // during migration, hold chart queries before user choose review or cancel
-    if (
-      this.props.triggerQuery &&
-      this.props.filterboxMigrationState !== 'UNDECIDED'
-    ) {
-      // if the chart is deactivated (filter_box), only load once
-      if (this.props.isDeactivatedViz && this.props.queriesResponse) {
-        return;
-      }
+    if (this.props.triggerQuery) {
       this.runQuery();
     }
   }
 
   runQuery() {
-    if (this.props.chartId > 0 && isFeatureEnabled(FeatureFlag.CLIENT_CACHE)) {
-      // Load saved chart with a GET request
-      this.props.actions.getSavedChart(
-        this.props.formData,
-        this.props.force || getUrlParam(URL_PARAMS.force), // allow override via url params force=true
-        this.props.timeout,
-        this.props.chartId,
-        this.props.dashboardId,
-        this.props.ownState,
-      );
-    } else {
-      // Create chart with POST request
-      this.props.actions.postChartFormData(
-        this.props.formData,
-        this.props.force || getUrlParam(URL_PARAMS.force), // allow override via url params force=true
-        this.props.timeout,
-        this.props.chartId,
-        this.props.dashboardId,
-        this.props.ownState,
-      );
-    }
+    // Create chart with POST request
+    this.props.actions.postChartFormData(
+      this.props.formData,
+      Boolean(this.props.force || getUrlParam(URL_PARAMS.force)), // allow override via url params force=true
+      this.props.timeout,
+      this.props.chartId,
+      this.props.dashboardId,
+      this.props.ownState,
+    );
   }
 
   handleRenderContainerFailure(error, info) {
@@ -211,7 +219,7 @@ class Chart extends React.PureComponent {
       chartAlert !== undefined &&
       chartAlert !== NONEXISTENT_DATASET &&
       datasource === PLACEHOLDER_DATASOURCE &&
-      datasetsStatus !== ResourceStatus.ERROR
+      datasetsStatus !== ResourceStatus.Error
     ) {
       return (
         <Styles
@@ -234,9 +242,40 @@ class Chart extends React.PureComponent {
         subtitle={<MonospaceDiv>{message}</MonospaceDiv>}
         copyText={message}
         link={queryResponse ? queryResponse.link : null}
-        source={dashboardId ? 'dashboard' : 'explore'}
+        source={dashboardId ? ChartSource.Dashboard : ChartSource.Explore}
         stackTrace={chartStackTrace}
       />
+    );
+  }
+
+  renderSpinner(databaseName) {
+    const message = databaseName
+      ? t('Waiting on %s', databaseName)
+      : t('Waiting on database...');
+
+    return (
+      <LoadingDiv>
+        <Loading position="inline-centered" />
+        <MessageSpan>{message}</MessageSpan>
+      </LoadingDiv>
+    );
+  }
+
+  renderChartContainer() {
+    return (
+      <div className="slice_container" data-test="slice-container">
+        {this.props.isInView ||
+        !isFeatureEnabled(FeatureFlag.DashboardVirtualization) ||
+        isCurrentUserBot() ? (
+          <ChartRenderer
+            {...this.props}
+            source={this.props.dashboardId ? 'dashboard' : 'explore'}
+            data-test={this.props.vizType}
+          />
+        ) : (
+          <Loading />
+        )}
+      </div>
     );
   }
 
@@ -245,12 +284,13 @@ class Chart extends React.PureComponent {
       height,
       chartAlert,
       chartStatus,
+      datasource,
       errorMessage,
       chartIsStale,
       queriesResponse = [],
-      isDeactivatedViz = false,
       width,
     } = this.props;
+    const databaseName = datasource?.database?.name;
 
     const isLoading = chartStatus === 'loading';
     this.renderContainerStartTime = Logger.getTimestamp();
@@ -306,14 +346,9 @@ class Chart extends React.PureComponent {
           height={height}
           width={width}
         >
-          <div className="slice_container" data-test="slice-container">
-            <ChartRenderer
-              {...this.props}
-              source={this.props.dashboardId ? 'dashboard' : 'explore'}
-              data-test={this.props.vizType}
-            />
-          </div>
-          {isLoading && !isDeactivatedViz && <Loading />}
+          {isLoading
+            ? this.renderSpinner(databaseName)
+            : this.renderChartContainer()}
         </Styles>
       </ErrorBoundary>
     );

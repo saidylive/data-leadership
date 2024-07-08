@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import React from 'react';
 import { render, screen } from 'spec/helpers/testing-library';
 import userEvent from '@testing-library/user-event';
 import FaveStar from '.';
@@ -75,7 +74,7 @@ test('render content on tooltip', async () => {
   expect(screen.getByRole('button')).toBeInTheDocument();
 });
 
-test('Call fetchFaveStar only on the first render', async () => {
+test('Call fetchFaveStar on first render and on itemId change', async () => {
   const props = {
     itemId: 3,
     fetchFaveStar: jest.fn(),
@@ -92,5 +91,5 @@ test('Call fetchFaveStar only on the first render', async () => {
   expect(props.fetchFaveStar).toBeCalledWith(props.itemId);
 
   rerender(<FaveStar {...{ ...props, itemId: 2 }} />);
-  expect(props.fetchFaveStar).toBeCalledTimes(1);
+  expect(props.fetchFaveStar).toBeCalledTimes(2);
 });

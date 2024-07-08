@@ -14,28 +14,51 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import json
+
+# pylint: disable=import-outside-toplevel
+
 from datetime import datetime
+from typing import Optional
 from unittest import mock
 
 import pytest
+from pytest_mock import MockerFixture
+from sqlalchemy.engine.url import make_url
 
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
-from tests.unit_tests.fixtures.common import dttm
+from superset.utils import json
+from tests.unit_tests.db_engine_specs.utils import assert_convert_dttm
+from tests.unit_tests.fixtures.common import dttm  # noqa: F401
 
 
 @pytest.mark.parametrize(
-    "actual,expected",
+    "target_type,expected_result",
     [
-        ("DATE", "TO_DATE('2019-01-02')"),
-        ("DATETIME", "CAST('2019-01-02T03:04:05.678900' AS DATETIME)"),
-        ("TIMESTAMP", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("Date", "TO_DATE('2019-01-02')"),
+        ("DateTime", "CAST('2019-01-02T03:04:05.678900' AS DATETIME)"),
+        ("TimeStamp", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMP_NTZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMP_LTZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMP_TZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMPLTZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMPNTZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("TIMESTAMPTZ", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        (
+            "TIMESTAMP WITH LOCAL TIME ZONE",
+            "TO_TIMESTAMP('2019-01-02T03:04:05.678900')",
+        ),
+        ("TIMESTAMP WITHOUT TIME ZONE", "TO_TIMESTAMP('2019-01-02T03:04:05.678900')"),
+        ("UnknownType", None),
     ],
 )
-def test_convert_dttm(actual: str, expected: str, dttm: datetime) -> None:
-    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+def test_convert_dttm(
+    target_type: str,
+    expected_result: Optional[str],
+    dttm: datetime,  # noqa: F811
+) -> None:
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec as spec
 
-    assert SnowflakeEngineSpec.convert_dttm(actual, dttm) == expected
+    assert_convert_dttm(spec, target_type, expected_result, dttm)
 
 
 def test_database_connection_test_mutator() -> None:
@@ -73,11 +96,11 @@ def test_extract_errors() -> None:
         )
     ]
 
-    msg = "syntax error line 1 at position 10 unexpected 'limmmited'."
+    msg = "syntax error line 1 at position 10 unexpected 'limited'."
     result = SnowflakeEngineSpec.extract_errors(Exception(msg))
     assert result == [
         SupersetError(
-            message='Please check your query for syntax errors at or near "limmmited". Then, try running your query again.',
+            message='Please check your query for syntax errors at or near "limited". Then, try running your query again.',
             error_type=SupersetErrorType.SYNTAX_ERROR,
             level=ErrorLevel.ERROR,
             extra={
@@ -122,3 +145,149 @@ def test_cancel_query_failed(engine_mock: mock.Mock) -> None:
     query = Query()
     cursor_mock = engine_mock.raiseError.side_effect = Exception()
     assert SnowflakeEngineSpec.cancel_query(cursor_mock, query, "123") is False
+
+
+def test_get_extra_params(mocker: MockerFixture) -> None:
+    """
+    Test the ``get_extra_params`` method.
+    """
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+
+    database = mocker.MagicMock()
+
+    database.extra = {}
+    assert SnowflakeEngineSpec.get_extra_params(database) == {
+        "engine_params": {"connect_args": {"application": "Apache Superset"}}
+    }
+
+    database.extra = json.dumps(
+        {
+            "engine_params": {
+                "connect_args": {"application": "Custom user agent", "foo": "bar"}
+            }
+        }
+    )
+    assert SnowflakeEngineSpec.get_extra_params(database) == {
+        "engine_params": {
+            "connect_args": {"application": "Custom user agent", "foo": "bar"}
+        }
+    }
+
+
+def test_get_schema_from_engine_params() -> None:
+    """
+    Test the ``get_schema_from_engine_params`` method.
+    """
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+
+    assert (
+        SnowflakeEngineSpec.get_schema_from_engine_params(
+            make_url("snowflake://user:pass@account/database_name/default"),
+            {},
+        )
+        == "default"
+    )
+
+    assert (
+        SnowflakeEngineSpec.get_schema_from_engine_params(
+            make_url("snowflake://user:pass@account/database_name"),
+            {},
+        )
+        is None
+    )
+
+    assert (
+        SnowflakeEngineSpec.get_schema_from_engine_params(
+            make_url("snowflake://user:pass@account/"),
+            {},
+        )
+        is None
+    )
+
+
+def test_adjust_engine_params_fully_qualified() -> None:
+    """
+    Test the ``adjust_engine_params`` method when the URL has catalog and schema.
+    """
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+
+    url = make_url("snowflake://user:pass@account/database_name/default")
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(url, {})[0]
+    assert str(uri) == "snowflake://user:pass@account/database_name/default"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        schema="new_schema",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/database_name/new_schema"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        catalog="new_catalog",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/new_catalog/default"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        catalog="new_catalog",
+        schema="new_schema",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/new_catalog/new_schema"
+
+
+def test_adjust_engine_params_catalog_only() -> None:
+    """
+    Test the ``adjust_engine_params`` method when the URL has only the catalog.
+    """
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+
+    url = make_url("snowflake://user:pass@account/database_name")
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(url, {})[0]
+    assert str(uri) == "snowflake://user:pass@account/database_name"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        schema="new_schema",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/database_name/new_schema"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        catalog="new_catalog",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/new_catalog"
+
+    uri = SnowflakeEngineSpec.adjust_engine_params(
+        url,
+        {},
+        catalog="new_catalog",
+        schema="new_schema",
+    )[0]
+    assert str(uri) == "snowflake://user:pass@account/new_catalog/new_schema"
+
+
+def test_get_default_catalog() -> None:
+    """
+    Test the ``get_default_catalog`` method.
+    """
+    from superset.db_engine_specs.snowflake import SnowflakeEngineSpec
+    from superset.models.core import Database
+
+    database = Database(
+        database_name="my_db",
+        sqlalchemy_uri="snowflake://user:pass@account/database_name",
+    )
+    assert SnowflakeEngineSpec.get_default_catalog(database) == "database_name"
+
+    database = Database(
+        database_name="my_db",
+        sqlalchemy_uri="snowflake://user:pass@account/database_name/default",
+    )
+    assert SnowflakeEngineSpec.get_default_catalog(database) == "database_name"
