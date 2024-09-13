@@ -27,7 +27,8 @@ if [ "$BUILD_SUPERSET_FRONTEND_IN_DOCKER" = "true" ]; then
     cd /app/superset-frontend
     npm install -f --omit=optional --global webpack webpack-cli
     npm install -f --omit=optional
-
+    npm install eslint-plugin-react@latest --save-dev
+    # npm update
     echo "Running frontend"
     npm run prod
 else
