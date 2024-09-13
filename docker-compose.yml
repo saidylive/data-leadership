@@ -76,6 +76,11 @@ services:
       - ./docker/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
 
   pgadmin:
+    env_file:
+      - path: docker/.env.pgadmin # default
+        required: true
+      - path: docker/.env.pgadmin-local # optional override
+        required: false
     image: dpage/pgadmin4:latest
     container_name: superset_pgadmin
     restart: unless-stopped

@@ -30,6 +30,8 @@ cover
 .DS_Store
 .eggs
 .env
+.env.pgadmin
+.env.pgadmin-local
 .envrc
 .idea
 .mypy_cache
