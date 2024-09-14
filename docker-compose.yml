@@ -245,6 +245,36 @@ services:
     healthcheck:
       test: [ "CMD-SHELL", "celery inspect ping -A superset.tasks.celery_app:app -d celery@$$HOSTNAME" ]
 
+  mysql:
+    container_name: mysql
+    image: mariadb:10.3.36
+    env_file:
+      - path: docker/.env.mysql
+        required: true
+    ports:
+      - "3306:3306"
+
+    volumes:
+      - "../mysql_data:/var/lib/mysql"
+    restart: always
+
+  mysql_pma:
+    image: phpmyadmin
+    container_name: mysql_pma
+    ports:
+      - 8980:80
+    env_file:
+      - path: docker/.env.pma
+        required: true
+    labels:
+      app.docker.created: "Md. Sheikh Saidy"
+      app.docker.env: "production"
+      app.docker.service: "phpmyadmin"
+    depends_on:
+      - mysql
+    restart: always
+
+
 volumes:
   superset_home:
     external: false
