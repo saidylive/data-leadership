@@ -31,7 +31,7 @@ if [ "$BUILD_SUPERSET_FRONTEND_IN_DOCKER" = "true" ]; then
     # npm install
 
     echo "Running frontend"
-    npm run dev
+    npm run prod
 
 else
     echo "Skipping frontend build steps - YOU NEED TO RUN IT MANUALLY ON THE HOST!"
