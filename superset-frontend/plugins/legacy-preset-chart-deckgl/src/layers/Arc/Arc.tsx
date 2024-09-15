@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { ArcLayer } from 'deck.gl/dist/index.cjs';
+import { ArcLayer } from 'deck.gl/typed';
 import {
   HandlerFunction,
   JsonObject,

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { HexagonLayer, Color } from 'deck.gl/dist/index.cjs';
+import { HexagonLayer, Color } from 'deck.gl/typed';
 import {
   t,
   CategoricalColorNamespace,

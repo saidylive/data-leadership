@@ -33,7 +33,7 @@ import SankeyChartPlugin from '@superset-ui/legacy-plugin-chart-sankey';
 import TableChartPlugin from '@superset-ui/plugin-chart-table';
 // import TableCheckboxPlugin from '@superset-ui/plugin-chart-table/TableCheckbox';
 // import { SupersetPluginChartTableTick } from 'superset-plugin-chart-table-tick';
-import TreemapChartPlugin from '@superset-ui/legacy-plugin-chart-treemap';
+// import TreemapChartPlugin from '@superset-ui/legacy-plugin-chart-treemap';
 import { WordCloudChartPlugin } from '@superset-ui/plugin-chart-word-cloud';
 import WorldMapChartPlugin from '@superset-ui/legacy-plugin-chart-world-map';
 import {
@@ -46,7 +46,7 @@ import {
   LineChartPlugin,
   TimePivotChartPlugin,
 } from '@superset-ui/legacy-preset-chart-nvd3';
-import { DeckGLChartPreset } from '@superset-ui/legacy-preset-chart-deckgl';
+// import { DeckGLChartPreset } from '@superset-ui/legacy-preset-chart-deckgl';
 import {
   BigNumberChartPlugin,
   BigNumberTotalChartPlugin,
@@ -100,7 +100,7 @@ export default class MainPreset extends Preset {
       
     super({
       name: 'Legacy charts',
-      presets: [new DeckGLChartPreset()],
+      // presets: [new DeckGLChartPreset()],
       plugins: [
         new AreaChartPlugin().configure({ key: 'area' }),
         new BarChartPlugin().configure({ key: 'bar' }),

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Color, GridLayer } from 'deck.gl/dist/index.cjs';
+import { Color, GridLayer } from 'deck.gl/typed';
 import {
   t,
   CategoricalColorNamespace,
