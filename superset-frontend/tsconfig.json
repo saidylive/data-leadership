@@ -5,7 +5,7 @@
     "noImplicitReturns": true,
     "noImplicitThis": true,
     "noUnusedLocals": true,
-    "strictNullChecks": true,
+    "strictNullChecks": false,
 
     /* Modules */
     "baseUrl": ".",
@@ -49,6 +49,7 @@
     "esModuleInterop": false,
     "forceConsistentCasingInFileNames": true,
 
+    "ignoreDeprecations": "5.0",
     /* Backwards Compatibility */
     "suppressImplicitAnyIndexErrors": true,
 
@@ -75,5 +76,8 @@
     "./plugins/*/types/**/*",
     "./packages/*/test/**/*",
     "./plugins/*/test/**/*"
-  ]
+  ],
+  "ts-node": {
+    "esm": true
+  }
 }

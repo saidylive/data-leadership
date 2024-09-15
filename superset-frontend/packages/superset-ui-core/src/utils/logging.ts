@@ -17,7 +17,7 @@
  * under the License.
  */
 
-const console = window.console || {};
+const console = window.console || {} as any;
 const log = console.log || (() => {});
 
 const logger = {

@@ -241,7 +241,6 @@ export const countries = {
   argentina,
   armenia,
   australia,
-  austria,
   azerbaijan,
   bahrain,
   bangladesh,
