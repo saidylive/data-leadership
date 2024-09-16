@@ -27,7 +27,7 @@ if [ "$BUILD_SUPERSET_FRONTEND_IN_DOCKER" = "true" ]; then
     echo "Building Superset frontend in production mode inside docker container"
     cd /app/superset-frontend
     
-    if [ -f "/app/superset-frontend/node_modules" ]; then
+    if [ -d /app/superset-frontend/node_modules ]; then
         echo "Skipping npm install because node_modules exists"
     else
         echo "Running `npm install`"
