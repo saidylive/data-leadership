@@ -65,7 +65,8 @@
     "skipLibCheck": true
   },
   "exclude": [
-    "./packages/generator-superset/test/**/*"
+    "./packages/generator-superset/test/**/*",
+    "./plugins/superset-plugin-chart-table-tick/**/*"
   ],
   "include": [
     "./src/**/*",
