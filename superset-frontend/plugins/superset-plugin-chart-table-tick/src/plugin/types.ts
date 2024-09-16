@@ -30,11 +30,26 @@
   ChartDataResponseResult,
   QueryFormData,
   SetDataMaskHook,
-  QueryObjectFilterClause,
+  QueryObjectFilterClause,,
+  CurrencyFormatter,
+  Currency,
 } from '@superset-ui/core';
-import { ColorFormatters, ColumnConfig } from '@superset-ui/chart-controls';
+import { ColorFormatters } from '@superset-ui/chart-controls';
 
 export type CustomFormatter = (value: DataRecordValue) => string;
+
+export type TableColumnConfig = {
+  d3NumberFormat?: string;
+  d3SmallNumberFormat?: string;
+  d3TimeFormat?: string;
+  columnWidth?: number;
+  horizontalAlign?: 'left' | 'right' | 'center';
+  showCellBars?: boolean;
+  alignPositiveNegative?: boolean;
+  colorPositiveNegative?: boolean;
+  truncateLongCells?: boolean;
+  currencyFormat?: Currency;
+};
 
 export interface DataColumnMeta {
   // `key` is what is called `label` in the input props
@@ -46,7 +61,7 @@ export interface DataColumnMeta {
   isMetric?: boolean;
   isPercentMetric?: boolean;
   isNumeric?: boolean;
-  config?: ColumnConfig;
+  config?: TableColumnConfig;
 }
 
 export interface TableChartData {
@@ -71,7 +86,7 @@ export type TableCheckboxFormData = QueryFormData & {
   table_timestamp_format?: string;
   emit_filter?: boolean;
   time_grain_sqla?: TimeGranularity;
-  column_config?: Record<string, ColumnConfig>;
+  column_config?: Record<string, TableColumnConfig>;
   allow_rearrange_columns?: boolean;
   tick_text?: string;
   use_tick?: boolean;

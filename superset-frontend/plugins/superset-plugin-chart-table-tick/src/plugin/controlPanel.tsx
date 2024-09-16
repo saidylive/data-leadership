@@ -22,12 +22,10 @@ import React from 'react';
 import {
   ChartDataResponseResult,
   ensureIsArray,
-  FeatureFlag,
   GenericDataType,
-  isFeatureEnabled,
   QueryFormColumn,
   QueryMode,
-  smartDateFormatter,
+  SMART_DATE_ID,
   t,
 } from '@superset-ui/core';
 
@@ -39,17 +37,15 @@ import {
   ControlStateMapping,
   D3_TIME_FORMAT_OPTIONS,
   QueryModeLabel,
-  sections,
   sharedControls,
   ControlPanelState,
   ControlState,
-  emitFilterControl,
   Dataset,
   ColumnMeta,
   defineSavedMetrics,
-  getStandardizedControls,
-  ControlFormItemSpec,
-  DEFAULT_CONFIG_FORM_LAYOUT
+  getStandardizedControls
+  // ControlFormItemSpec,
+  // sections,
 } from '@superset-ui/chart-controls';
 
 // import { DEFAULT_CONFIG_FORM_LAYOUT } from '@superset-ui/chart-controls/shared-controls/components/ColumnConfigControl/constants';
@@ -58,14 +54,14 @@ import { PAGE_SIZE_OPTIONS } from '../consts';
 
 function getQueryMode(controls: ControlStateMapping): QueryMode {
   const mode = controls?.query_mode?.value;
-  if (mode === QueryMode.aggregate || mode === QueryMode.raw) {
+  if (mode === QueryMode.Aggregate || mode === QueryMode.Raw) {
     return mode as QueryMode;
   }
   const rawColumns = controls?.all_columns?.value as
     | QueryFormColumn[]
     | undefined;
   const hasRawColumns = rawColumns && rawColumns.length > 0;
-  return hasRawColumns ? QueryMode.raw : QueryMode.aggregate;
+  return hasRawColumns ? QueryMode.Raw : QueryMode.Aggregate;
 }
 
 /**
@@ -150,47 +146,47 @@ const percentMetricsControl: typeof sharedControls.metrics = {
 };
 
 
-const tickBoxColumnConfigs: { name: string; config: ControlFormItemSpec }[] = [
-  {
-    name: 'useTick',
-    config: {
-      controlType: 'Checkbox',
-      label: t('Use Tick Icon'),
-      description: t('Enable Tick Icon in table cells'),
-      defaultValue: false,
-      debounceDelay: 400,
-    },
-  },
-  {
-    name: 'tickText',
-    config: {
-      controlType: 'Input',
-      label: t('Tick Text'),
-      description: t('Text of the Tick'),
-      defaultValue: "yes",
-      debounceDelay: 400,
-    },
-  },
-  {
-    name: 'iconHeight',
-    config: {
-      controlType: 'InputNumber',
-      label: t('Max Icon Height'),
-      description: t('Max Height of the tick icons'),
-      defaultValue: 18,
-      debounceDelay: 400,
-    },
-  }
-];
+// const tickBoxColumnConfigs: { name: string; config: ControlFormItemSpec }[] = [
+//   {
+//     name: 'useTick',
+//     config: {
+//       controlType: 'Checkbox',
+//       label: t('Use Tick Icon'),
+//       description: t('Enable Tick Icon in table cells'),
+//       defaultValue: false,
+//       debounceDelay: 400,
+//     },
+//   },
+//   {
+//     name: 'tickText',
+//     config: {
+//       controlType: 'Input',
+//       label: t('Tick Text'),
+//       description: t('Text of the Tick'),
+//       defaultValue: "yes",
+//       debounceDelay: 400,
+//     },
+//   },
+//   {
+//     name: 'iconHeight',
+//     config: {
+//       controlType: 'InputNumber',
+//       label: t('Max Icon Height'),
+//       description: t('Max Height of the tick icons'),
+//       defaultValue: 18,
+//       debounceDelay: 400,
+//     },
+//   }
+// ];
 
 
-const tickBoxColumnValue = () => {
-  const menus = DEFAULT_CONFIG_FORM_LAYOUT
-  const stringconfgis = [...menus[GenericDataType.STRING], tickBoxColumnConfigs]
-  menus[GenericDataType.STRING] = stringconfgis
-  // console.log("menus", menus)
-  return menus
-}
+// const tickBoxColumnValue = () => {
+//   const menus = DEFAULT_CONFIG_FORM_LAYOUT
+//   const stringconfgis = [...menus[GenericDataType.String], tickBoxColumnConfigs]
+//   menus[GenericDataType.String] = stringconfgis
+//   // console.log("menus", menus)
+//   return menus
+// }
 
 const config: ControlPanelConfig = {
   /**
@@ -269,7 +265,6 @@ const config: ControlPanelConfig = {
 
   // For control input types, see: superset-frontend/src/explore/components/controls/index.js
   controlPanelSections: [
-    sections.legacyRegularTime,
     {
       label: t('Query'),
       expanded: true,
@@ -379,22 +374,19 @@ const config: ControlPanelConfig = {
             },
           },
         ],
-        isFeatureEnabled(FeatureFlag.DASHBOARD_CROSS_FILTERS) ||
-          isFeatureEnabled(FeatureFlag.DASHBOARD_NATIVE_FILTERS)
-          ? [
-            {
-              name: 'server_pagination',
-              config: {
-                type: 'CheckboxControl',
-                label: t('Server pagination'),
-                description: t(
-                  'Enable server side pagination of results (experimental feature)',
-                ),
-                default: false,
-              },
+        [
+          {
+            name: 'server_pagination',
+            config: {
+              type: 'CheckboxControl',
+              label: t('Server pagination'),
+              description: t(
+                'Enable server side pagination of results (experimental feature)',
+              ),
+              default: false,
             },
-          ]
-          : [],
+          },
+        ],
         [
           {
             name: 'row_limit',
@@ -459,7 +451,6 @@ const config: ControlPanelConfig = {
             },
           },
         ],
-        emitFilterControl,
       ],
     },
     // tickOptionTest,
@@ -474,7 +465,7 @@ const config: ControlPanelConfig = {
               type: 'SelectControl',
               freeForm: true,
               label: t('Timestamp format'),
-              default: smartDateFormatter.id,
+              default: SMART_DATE_ID,
               renderTrigger: true,
               clearable: false,
               choices: D3_TIME_FORMAT_OPTIONS,
@@ -571,9 +562,9 @@ const config: ControlPanelConfig = {
               label: t('Customize columns'),
               description: t('Further customize how to display each column'),
               renderTrigger: true,
-              configFormLayout: tickBoxColumnValue(),
+              // configFormLayout: tickBoxColumnValue(),
               // configFormLayout: {
-              //   [GenericDataType.NUMERIC]: [[radarMetricMaxValue]],
+              //   [GenericDataType.Numeric]: [[radarMetricMaxValue]],
               // },
               shouldMapStateToProps() {
                 return true;
@@ -615,7 +606,7 @@ const config: ControlPanelConfig = {
                     ? colnames
                       .filter(
                         (colname: string, index: number) =>
-                          coltypes[index] === GenericDataType.NUMERIC,
+                          coltypes[index] === GenericDataType.Numeric,
                       )
                       .map(colname => ({
                         value: colname,
@@ -632,6 +623,7 @@ const config: ControlPanelConfig = {
         ],
       ],
     }
+    
   ],
   formDataOverrides: formData => ({
     ...formData,

@@ -24,11 +24,15 @@ if [ "$PUPPETEER_SKIP_CHROMIUM_DOWNLOAD" = "false" ]; then
 fi
 
 if [ "$BUILD_SUPERSET_FRONTEND_IN_DOCKER" = "true" ]; then
-    echo "Building Superset frontend in dev mode inside docker container"
+    echo "Building Superset frontend in production mode inside docker container"
     cd /app/superset-frontend
-
-    echo "Running `npm install`"
-    npm install
+    
+    if [ -f "/app/superset-frontend/node_modules" ]; then
+        echo "Skipping npm install because node_modules exists"
+    else
+        echo "Running `npm install`"
+        npm install
+    fi
 
     echo "Running frontend"
     npm run prod
