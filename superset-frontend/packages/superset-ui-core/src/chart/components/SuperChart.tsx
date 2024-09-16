@@ -118,10 +118,10 @@ class SuperChart extends PureComponent<Props, {}> {
       // Parse them in case they are % or 'auto'
       const widthInfo = parseLength(width);
       const heightInfo = parseLength(height);
-      const boxHeight = heightInfo.isDynamic == true
+      const boxHeight = heightInfo.isDynamic
         ? `${heightInfo.multiplier * 100}%`
         : heightInfo.value;
-      const boxWidth = widthInfo.isDynamic == true
+      const boxWidth = widthInfo.isDynamic
         ? `${widthInfo.multiplier * 100}%`
         : widthInfo.value;
       const style = {

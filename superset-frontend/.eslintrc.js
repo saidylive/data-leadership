@@ -91,7 +91,6 @@ module.exports = {
       ],
       plugins: ['@typescript-eslint/eslint-plugin', 'react', 'prettier'],
       rules: {
-        eqeqeq: 'off',
         '@typescript-eslint/ban-ts-ignore': 0,
         '@typescript-eslint/ban-ts-comment': 0, // disabled temporarily
         '@typescript-eslint/ban-types': 0, // disabled temporarily
@@ -161,7 +160,7 @@ module.exports = {
         'react/require-default-props': 0,
         'react/sort-comp': 0, // TODO: re-enable in separate PR
         'react/static-property-placement': 0, // re-enable up for discussion
-        // 'prettier/prettier': 'error',
+        'prettier/prettier': 'error',
         'file-progress/activate': 1,
         // delete me later: temporary rules to help with migration
         'jsx-no-useless-fragment': 0,
@@ -231,7 +230,6 @@ module.exports = {
         'plugin:testing-library/react',
       ],
       rules: {
-        eqeqeq: 'off',
         'import/no-extraneous-dependencies': [
           'error',
           { devDependencies: true },
@@ -279,7 +277,6 @@ module.exports = {
         'packages/superset-ui-core/src/style/index.tsx',
       ],
       rules: {
-        eqeqeq: 'off',
         'theme-colors/no-literal-colors': 0,
         'translation-vars/no-template-vars': 0,
         'no-restricted-imports': 0,
@@ -289,7 +286,6 @@ module.exports = {
     },
   ],
   rules: {
-    eqeqeq: 'off',
     'theme-colors/no-literal-colors': 'error',
     'translation-vars/no-template-vars': ['error', true],
     camelcase: [

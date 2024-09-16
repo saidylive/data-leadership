@@ -133,7 +133,7 @@ describe('parseResponse()', () => {
       'raw',
     );
     expect(fetchMock.calls(mockNoParseUrl)).toHaveLength(2);
-    expect((responseNull as Response).bodyUsed).toBe(false);
+    expect(responseNull.bodyUsed).toBe(false);
     expect(responseRaw.bodyUsed).toBe(false);
   });
 
@@ -161,11 +161,11 @@ describe('parseResponse()', () => {
     );
     expect(
       responseBigNumber.json.floatValue.plus +
-      responseBigNumber.json.floatValue.minus,
+        responseBigNumber.json.floatValue.minus,
     ).toEqual(0);
     expect(
       responseBigNumber.json.floatValue.plus /
-      responseBigNumber.json.floatValue.minus,
+        responseBigNumber.json.floatValue.minus,
     ).toEqual(-1);
     expect(Math.min(responseBigNumber.json.floatValue.plus, 0)).toEqual(0);
     expect(Math.abs(responseBigNumber.json.floatValue.minus)).toEqual(

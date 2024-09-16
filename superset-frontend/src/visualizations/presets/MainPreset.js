@@ -31,9 +31,6 @@ import PartitionChartPlugin from '@superset-ui/legacy-plugin-chart-partition';
 import RoseChartPlugin from '@superset-ui/legacy-plugin-chart-rose';
 import SankeyChartPlugin from '@superset-ui/legacy-plugin-chart-sankey';
 import TableChartPlugin from '@superset-ui/plugin-chart-table';
-// import TableCheckboxPlugin from '@superset-ui/plugin-chart-table/TableCheckbox';
-// import { SupersetPluginChartTableTick } from 'superset-plugin-chart-table-tick';
-// import TreemapChartPlugin from '@superset-ui/legacy-plugin-chart-treemap';
 import { WordCloudChartPlugin } from '@superset-ui/plugin-chart-word-cloud';
 import WorldMapChartPlugin from '@superset-ui/legacy-plugin-chart-world-map';
 import {
@@ -46,7 +43,7 @@ import {
   LineChartPlugin,
   TimePivotChartPlugin,
 } from '@superset-ui/legacy-preset-chart-nvd3';
-// import { DeckGLChartPreset } from '@superset-ui/legacy-preset-chart-deckgl';
+import { DeckGLChartPreset } from '@superset-ui/legacy-preset-chart-deckgl';
 import {
   BigNumberChartPlugin,
   BigNumberTotalChartPlugin,
@@ -82,7 +79,7 @@ import {
   TimeGrainFilterPlugin,
 } from 'src/filters/components';
 import { PivotTableChartPlugin as PivotTableChartPluginV2 } from '@superset-ui/plugin-chart-pivot-table';
-// import { HandlebarsChartPlugin } from '@superset-ui/plugin-chart-handlebars';
+import { HandlebarsChartPlugin } from '@superset-ui/plugin-chart-handlebars';
 import { FilterPlugins } from 'src/constants';
 import TimeTableChartPlugin from '../TimeTable';
 
@@ -97,10 +94,10 @@ export default class MainPreset extends Preset {
           }),
         ]
       : [];
-      
+
     super({
       name: 'Legacy charts',
-      // presets: [new DeckGLChartPreset()],
+      presets: [new DeckGLChartPreset()],
       plugins: [
         new AreaChartPlugin().configure({ key: 'area' }),
         new BarChartPlugin().configure({ key: 'bar' }),
@@ -137,8 +134,6 @@ export default class MainPreset extends Preset {
         new RoseChartPlugin().configure({ key: 'rose' }),
         new SankeyChartPlugin().configure({ key: 'sankey' }),
         new TableChartPlugin().configure({ key: 'table' }),
-        // new TableCheckboxPlugin().configure({ key: 'table_checkbox' }),
-        // new SupersetPluginChartTableTick().configure({ key: 'table_tick' }),
         new TimePivotChartPlugin().configure({ key: 'time_pivot' }),
         new TimeTableChartPlugin().configure({ key: 'time_table' }),
         new WordCloudChartPlugin().configure({ key: 'word_cloud' }),
@@ -180,7 +175,7 @@ export default class MainPreset extends Preset {
         }),
         new EchartsTreeChartPlugin().configure({ key: 'tree_chart' }),
         new EchartsSunburstChartPlugin().configure({ key: 'sunburst_v2' }),
-        // new HandlebarsChartPlugin().configure({ key: 'handlebars' }),
+        new HandlebarsChartPlugin().configure({ key: 'handlebars' }),
         new EchartsBubbleChartPlugin().configure({ key: 'bubble_v2' }),
         ...experimentalPlugins,
       ],

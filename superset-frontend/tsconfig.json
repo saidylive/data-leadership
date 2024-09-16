@@ -1,11 +1,11 @@
 {
   "compilerOptions": {
     /* Type Checking */
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "noImplicitReturns": true,
     "noImplicitThis": true,
     "noUnusedLocals": true,
-    "strictNullChecks": false,
+    "strictNullChecks": true,
 
     /* Modules */
     "baseUrl": ".",
@@ -76,8 +76,5 @@
     "./plugins/*/types/**/*",
     "./packages/*/test/**/*",
     "./plugins/*/test/**/*"
-  ],
-  "ts-node": {
-    "esm": true
-  }
+  ]
 }

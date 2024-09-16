@@ -26,6 +26,7 @@ import { LOGIN_GLOB } from '../fixtures/constants';
 // missing the toString function causing method to error out when casting to String
 class BadObject {}
 const corruptObject = new BadObject();
+/* @ts-expect-error */
 BadObject.prototype.toString = undefined;
 
 describe('callApi()', () => {

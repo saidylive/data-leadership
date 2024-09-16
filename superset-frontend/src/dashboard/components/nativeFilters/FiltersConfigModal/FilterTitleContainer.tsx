@@ -98,7 +98,7 @@ const FilterTitleContainer = forwardRef<HTMLDivElement, Props>(
       const isRemoved = !!removedFilters[id];
       const isErrored = erroredFilters.includes(id);
       const isActive = currentFilterId === id;
-      const classNames:any[] = [];
+      const classNames = [];
       if (isErrored) {
         classNames.push('errored');
       }
