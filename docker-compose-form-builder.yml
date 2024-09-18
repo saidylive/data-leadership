@@ -1,6 +1,7 @@
 services:
   apache:
-    image: php:8.1-apache
+    build:
+      context: ./form-builder
     container_name: apache
     ports:
       - 8091:8091
