@@ -14,4 +14,5 @@ services:
     volumes:
       - "/var/www/form_builder:/var/www/form_builder"
       - "../apache2/configs:/etc/apache2/sites-available"
+      - "../apache2/enabled:/etc/apache2/sites-enabled"
     restart: unless-stopped
