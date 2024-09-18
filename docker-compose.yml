@@ -284,6 +284,24 @@ services:
       - mysql
     restart: always
 
+  apache:
+    build:
+      context: ./form-builder
+    container_name: apache
+    ports:
+      - 8091:8091
+      - 9001:9001
+      - 9002:9002
+      - 9003:9003
+      - 9004:9004
+      - 9005:9005
+      - 9006:9006
+      - 9007:9007
+    volumes:
+      - "/var/www/form_builder:/var/www/form_builder"
+      - "../apache2/configs:/etc/apache2/sites-available"
+      - "../apache2/enabled:/etc/apache2/sites-enabled"
+    restart: unless-stopped
 
 volumes:
   superset_home:
