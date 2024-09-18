@@ -3,7 +3,6 @@ services:
     image: php:8.1-apache
     container_name: apache
     ports:
-      - 8081:80
       - 8091:8091
       - 9001:9001
       - 9002:9002
