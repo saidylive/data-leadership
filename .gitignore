@@ -32,6 +32,8 @@ cover
 .env
 .env.pgadmin
 .env.pgadmin-local
+.env.pma
+.env.mysql
 .envrc
 .idea
 .mypy_cache
