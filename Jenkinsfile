@@ -8,7 +8,7 @@ pipeline {
         registryCredential = 'Nexus'
         registryToolName = 'Docker'
         newVersion='latest'
-        gitUrl='https://gitlab.com/saidylive/apache-superset-a2i.git'
+        gitUrl='https://github.com/saidylive/data-leadership.git'
         gitCredId='Github account Credentials'
         gitBranch='main'
     }
